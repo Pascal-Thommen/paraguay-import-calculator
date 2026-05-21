@@ -10,7 +10,7 @@ from helpers import (
     lookup_hs_product, search_products, list_all_products, get_product_categories,
     calc_single_product, calc_multi_product,
     init_usage_db, log_session, log_calculation, get_admin_stats,
-    load_config, save_config, lookup_hs_with_ai, track_ai_tokens,
+    load_config, save_config, lookup_hs_with_ai, track_ai_tokens, test_ai_connection,
 )
 
 
@@ -109,7 +109,25 @@ if st.query_params.get("admin") == "true":
         claude_model = st.text_input("Claude Model", value=cfg.get("claude_model", "claude-3-haiku-20240307"))
         new_admin_pw = st.text_input("Admin-Passwort ändern", type="password", placeholder="Leer lassen = unverändert")
 
-        if st.form_submit_button("Speichern", width='stretch'):
+        if st.form_submit_button("💾 Speichern & Testen", width='stretch'):
+            cfg["ai_provider"] = provider
+            cfg["ollama_endpoint"] = ollama_endpoint
+            cfg["ollama_model"] = ollama_model
+            cfg["claude_api_key"] = claude_key
+            cfg["claude_model"] = claude_model
+            if new_admin_pw:
+                cfg["admin_password"] = new_admin_pw
+            save_config(cfg)
+            st.success("✅ Konfiguration gespeichert!")
+            # Run AI connection test + persist result
+            if provider:
+                test_result = test_ai_connection(cfg)
+                st.session_state["_admin_test_result"] = test_result
+                st.session_state["_admin_test_provider"] = provider
+            else:
+                st.session_state.pop("_admin_test_result", None)
+                st.session_state.pop("_admin_test_provider", None)
+                st.info("ℹ️ Kein KI-Provider gewählt.")
             cfg["ai_provider"] = provider
             cfg["ollama_endpoint"] = ollama_endpoint
             cfg["ollama_model"] = ollama_model
@@ -119,7 +137,19 @@ if st.query_params.get("admin") == "true":
                 cfg["admin_password"] = new_admin_pw
             save_config(cfg)
             st.success("Konfiguration gespeichert!")
-            st.rerun()
+            
+
+    # ── Connection Status (persistent) ──────────
+    _tr = st.session_state.get("_admin_test_result")
+    _tp = st.session_state.get("_admin_test_provider")
+    if _tr is not None:
+        if _tr.get("ok"):
+            st.success(f"🟢 {_tp} verbunden: {_tr.get('endpoint', _tr.get('model', _tp))}")
+            if "models" in _tr:
+                st.caption("Modelle: " + ", ".join(_tr["models"]))
+        else:
+            st.error(f"🔴 {_tp} fehlgeschlagen: {_tr.get('error', '?')}")
+            st.caption(f"Endpoint: {_tr.get('endpoint', _tp)}")
 
     st.markdown("---")
     st.subheader(f"📊 Letzte {len(stats.get('recent',[]))} Berechnungen")
@@ -332,18 +362,21 @@ st.sidebar.button(t("reset_button"), on_click=reset_state, type="secondary", wid
 st.sidebar.markdown("---")
 st.sidebar.info(t("legal_notice"))
 
-# ── Tabs ────────────────────────────────────────────
-tab_single, tab_multi = st.tabs([t("tab_single"), t("tab_multi")])
+# ── Dynamic Single Page ─────────────────────────────
+_is_multi = len(st.session_state.df_products) >= 2
 
 # ====================================================
-# TAB 1: SINGLE PRODUCT
+# PRODUCT TABLE (always visible)
 # ====================================================
-with tab_single:
-    st.markdown(
-        f'<div class="calc-card"><div class="card-header">{t("single_card_header")}</div></div>',
-        unsafe_allow_html=True,
-    )
+st.markdown(t("multi_card_header"))
 
+st.markdown(
+    f'<div class="calc-card"><div class="card-header">{t("single_card_header")}</div></div>',
+    unsafe_allow_html=True,
+)
+
+# Single-product fields (hidden when 2+ products)
+if not _is_multi:
     col1, col2, col3 = st.columns(3)
 
     # ── Column 1: Product specs ─────────────────────
@@ -536,9 +569,9 @@ with tab_single:
 
 
 # ====================================================
-# TAB 2: MULTI-PRODUCT
+# MULTI-PRODUCT MODE (2+ products)
 # ====================================================
-with tab_multi:
+if _is_multi:
     st.markdown(
         f'<div class="calc-card"><div class="card-header">{t("multi_card_header")}</div></div>',
         unsafe_allow_html=True,

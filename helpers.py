@@ -1215,20 +1215,41 @@ def lookup_hs_with_ai(description, config):
     return None
 
 def _ask_ollama(description, config):
-    model = config.get("ollama_model", "llama3.1:8b")
-    endpoint = config.get("ollama_endpoint", "http://localhost:11434")
-    prompt = 'You are a customs tariff expert. Return ONLY valid JSON: {"hs_code":"NNNNNNNN","explanation":"one-line German explanation"}. Product: "' + description + '"'
+    model = config.get("ollama_model", "qwen3-coder:480b")
+    endpoint = config.get("ollama_endpoint", "https://ollama.com/v1")
+    api_key = config.get("ollama_api_key", config.get("claude_api_key", ""))
+    prompt = 'You are a customs tariff expert. Return ONLY valid JSON with keys hs_code (8-digit HS code) and explanation (one-line German description). Product: "' + description + '"'
     try:
+        data = json.dumps({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a customs tariff expert. Always respond with valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 200,
+            "response_format": {"type": "json_object"}
+        }).encode()
         req = urllib.request.Request(
-            endpoint + "/api/generate",
-            data=json.dumps({"model": model, "prompt": prompt, "stream": False, "format": "json"}).encode(),
-            headers={"Content-Type": "application/json"})
+            endpoint + "/chat/completions",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + (api_key or "")
+            }
+        )
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
-            response = json.loads(data.get("response", "{}"))
-            return {"hs_code": response.get("hs_code",""), "explanation": response.get("explanation","KI-Vorschlag"), "tokens_used": data.get("eval_count",0)+data.get("prompt_eval_count",0), "provider": "ollama"}
+            content = data["choices"][0]["message"]["content"]
+            response = json.loads(content)
+            return {
+                "hs_code": response.get("hs_code", ""),
+                "explanation": response.get("explanation", "KI-Vorschlag"),
+                "tokens_used": data.get("usage", {}).get("total_tokens", 0),
+                "provider": "ollama"
+            }
     except Exception as e:
-        return {"hs_code": "", "explanation": "Fehler: "+str(e)[:100], "tokens_used": 0, "provider": "ollama"}
+        return {"hs_code": "", "explanation": "Fehler: " + str(e)[:100], "tokens_used": 0, "provider": "ollama"}
 
 def _ask_claude(description, config):
     api_key = config.get("claude_api_key", "")
@@ -1253,3 +1274,46 @@ def track_ai_tokens(tokens, config):
     save_config(config)
 
 print("EXTENSIONS_LOADED")
+def test_ai_connection(config: dict) -> dict:
+    provider = config.get('ai_provider', '')
+    if not provider:
+        return {'ok': False, 'error': 'Kein Provider konfiguriert'}
+    if provider == 'ollama':
+        return _test_ollama(config)
+    elif provider == 'claude':
+        return _test_claude(config)
+    return {'ok': False, 'error': f'Unbekannter Provider: {provider}'}
+
+def _test_ollama(config):
+    import urllib.request, json
+    ep = config.get('ollama_endpoint', 'https://ollama.com/v1')
+    model = config.get('ollama_model', 'qwen3-coder:480b')
+    api_key = config.get('ollama_api_key', config.get('claude_api_key', ''))
+    try:
+        req = urllib.request.Request(
+            ep + '/models',
+            headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (api_key or '')}
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+            models = [m['id'] for m in data.get('data', [])]
+            return {'ok': True, 'models': models[:10], 'endpoint': ep}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)[:200], 'endpoint': ep}
+
+def _test_claude(config):
+    import urllib.request, json
+    api_key = config.get('claude_api_key', '')
+    if not api_key:
+        return {'ok': False, 'error': 'Kein Claude API Key'}
+    try:
+        req = urllib.request.Request(
+            'https://api.anthropic.com/v1/messages',
+            data=json.dumps({'model': config.get('claude_model','claude-3-haiku-20240307'), 'max_tokens': 5, 'messages': [{'role':'user','content':'ping'}]}).encode(),
+            headers={'Content-Type': 'application/json', 'x-api-key': api_key, 'anthropic-version': '2023-06-01'})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+            return {'ok': True, 'model': data.get('model','?'), 'provider': 'claude'}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)[:200]}
+
