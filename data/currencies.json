@@ -1,0 +1,13 @@
+{
+  "USD": {"name": "US-Dollar", "symbol": "$", "decimals": 2},
+  "EUR": {"name": "Euro", "symbol": "€", "decimals": 2},
+  "PYG": {"name": "Guaraní Paraguayo", "symbol": "₲", "decimals": 0},
+  "BRL": {"name": "Real Brasileño", "symbol": "R$", "decimals": 2},
+  "ARS": {"name": "Peso Argentino", "symbol": "$", "decimals": 2},
+  "GBP": {"name": "Pfund Sterling", "symbol": "£", "decimals": 2},
+  "JPY": {"name": "Japanischer Yen", "symbol": "¥", "decimals": 0},
+  "CNY": {"name": "Chinesischer Yuan", "symbol": "¥", "decimals": 2},
+  "CAD": {"name": "Kanadischer Dollar", "symbol": "C$", "decimals": 2},
+  "AUD": {"name": "Australischer Dollar", "symbol": "A$", "decimals": 2},
+  "CHF": {"name": "Schweizer Franken", "symbol": "CHF", "decimals": 2}
+}

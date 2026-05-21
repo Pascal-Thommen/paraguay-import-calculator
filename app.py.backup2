@@ -1,0 +1,707 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import io
+import re
+from helpers import (
+    t, check_hs_code,
+    load_state, save_state, reset_state, init_defaults,
+    DEFAULTS,
+)
+
+# ----------------------------------------------------
+# Page Configuration & Styling
+# ----------------------------------------------------
+st.set_page_config(
+    page_title="Import-Kostenkalkulator Paraguay",
+    page_icon="🇵🇾",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ── Restore persisted state & set defaults ──────────
+load_state()
+init_defaults()
+
+# Handle DataFrame restoration from persistence
+if "_df_products_records" in st.session_state and "df_products" not in st.session_state:
+    try:
+        st.session_state.df_products = pd.DataFrame(
+            st.session_state["_df_products_records"]
+        )
+    except Exception:
+        pass
+
+if "df_products" not in st.session_state:
+    st.session_state.df_products = pd.DataFrame(
+        columns=["Produktname", "HS-Code", "Menge",
+                 "FOB pro Stk. (USD)", "Gewicht pro Stk. (kg)", "DAI (%)"]
+    )
+
+# ── Premium CSS ─────────────────────────────────────
+st.markdown("""
+<style>
+    /* Premium font and backgrounds */
+    .main { background-color: #fcfcfd; }
+
+    /* Title banner */
+    .title-banner {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 2.5rem; border-radius: 12px; color: white;
+        text-align: center; margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .title-banner h1 {
+        margin: 0; font-family: 'Outfit', sans-serif;
+        font-weight: 700; font-size: 2.5rem; letter-spacing: -0.5px;
+    }
+    .title-banner p {
+        margin: 0.5rem 0 0 0; font-size: 1.1rem; opacity: 0.9;
+    }
+
+    /* Cards */
+    .calc-card {
+        background-color: white; padding: 1.5rem; border-radius: 10px;
+        border: 1px solid #eef2f6; box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        margin-bottom: 1.5rem;
+    }
+    .card-header {
+        font-weight: 600; font-size: 1.2rem; color: #1e3c72;
+        margin-bottom: 1rem; border-bottom: 2px solid #f0f4f8;
+        padding-bottom: 0.5rem;
+    }
+
+    /* Result boxes */
+    .box-capitalized {
+        background: linear-gradient(180deg, #f8faff 0%, #eff4fc 100%);
+        border-left: 5px solid #2a5298; padding: 1.25rem;
+        border-radius: 6px; margin-bottom: 1rem;
+    }
+    .box-credit {
+        background: linear-gradient(180deg, #f6fdf9 0%, #eafaf1 100%);
+        border-left: 5px solid #27ae60; padding: 1.25rem;
+        border-radius: 6px; margin-bottom: 1rem;
+    }
+    .box-title {
+        font-size: 0.9rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.5px; color: #555; margin-bottom: 0.5rem;
+    }
+    .box-value { font-size: 1.8rem; font-weight: 800; color: #222; }
+    .box-sub { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+
+    /* ── HS-Code warning tooltip ── */
+    .hs-alert {
+        position: relative; display: inline-flex; align-items: center;
+        cursor: help; margin-top: 4px;
+    }
+    .hs-alert-icon {
+        font-size: 1.4rem; animation: hs-pulse 2s ease-in-out infinite;
+    }
+    .hs-alert-label {
+        font-size: 0.82rem; font-weight: 600; color: #c0392b;
+        margin-left: 6px;
+    }
+    .hs-alert-tooltip {
+        visibility: hidden; opacity: 0;
+        background: linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%);
+        border: 2px solid #e74c3c; border-radius: 10px;
+        padding: 14px 18px; position: absolute; z-index: 9999;
+        left: 0; top: 32px; width: 400px; max-width: 90vw;
+        box-shadow: 0 8px 28px rgba(231,76,60,0.22);
+        font-size: 0.84rem; line-height: 1.55; color: #333;
+        transition: opacity 0.25s ease, visibility 0.25s ease;
+    }
+    .hs-alert:hover .hs-alert-tooltip {
+        visibility: visible; opacity: 1;
+    }
+    .hs-alert-authority {
+        font-weight: 700; font-size: 0.92rem; color: #c0392b;
+        margin-bottom: 6px; border-bottom: 1px solid #e7c6a0;
+        padding-bottom: 4px;
+    }
+    @keyframes hs-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.18); }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ----------------------------------------------------
+# Helper formatting functions
+# ----------------------------------------------------
+def format_pyg(val):
+    """Format Paraguayan Guaraní as integer with thousands separators."""
+    return f"Gs. {int(round(val)):,}".replace(",", ".")
+
+def format_usd(val):
+    """Format US Dollars with two decimal places."""
+    return f"USD {val:,.2f}"
+
+# Tooltips (domain-specific, kept inline)
+TOOLTIPS = {
+    "exchange_rate": "Wechselkurs (PYG/USD) für die Umrechnung aller USD-Beträge.",
+    "fob": "Free on Board – reiner Warenwert am Verschiffungshafen (USD).",
+    "cif": "Cost, Insurance & Freight – Warenwert inkl. Fracht und Versicherung (PYG). Bemessungsgrundlage für Zölle.",
+    "dai": "Derecho Arancelario a la Importación – Importzoll (0–30 % auf CIF). Aktivierungspflichtig nach IAS 2.",
+    "valoracion": "Valoración Aduanera – Zollbewertungsgebühr (Standard: 0,5 % des CIF). Aktivierungspflichtig.",
+    "indi": "Instituto Paraguayo del Indígena – 7 % auf DAI (Ley 582/80). Aktivierungspflichtig.",
+    "canon_sofia": "Nutzungsgebühr IT-Zollsystem SOFIA (fixer Betrag in PYG). Aktivierungspflichtig.",
+    "consulado": "Konsulatsgebühren für die Legalisierung von Außenhandelsdokumenten. Aktivierungspflichtig.",
+    "tasa_portuaria": "Hafengebühren – Umschlag und Lagerung (ANNP oder privat). Aktivierungspflichtig.",
+    "despachante": "Honorare des Zollabfertigers (Despachante). Aktivierungspflichtig. IVA wird herausgerechnet.",
+    "inlandstransport": "Frachtkosten Zollhafen → Lager in PYG. Aktivierungspflichtig. IVA wird herausgerechnet.",
+    "iva_importacion": "IVA Importación (10 %) – Vorsteuerguthaben (Crédito Fiscal). Darf nach IAS 2.11 NICHT aktiviert werden.",
+    "percepcion_ire": "Percepción IRE – Vorauszahlung Einkommensteuer beim Import (meist 0,4 % auf CIF). Steuerguthaben, NICHT aktivierbar.",
+}
+
+# ── Banner ──────────────────────────────────────────
+st.markdown(f"""
+<div class="title-banner">
+    <h1>{t('banner_title')}</h1>
+    <p>{t('banner_subtitle')}</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ----------------------------------------------------
+# Sidebar
+# ----------------------------------------------------
+st.sidebar.markdown(t("sidebar_global_params"))
+
+# Language selector
+st.sidebar.selectbox(
+    t("lang_selector"),
+    options=["de", "en", "es"],
+    format_func=lambda x: {"de": "🇩🇪 Deutsch", "en": "🇬🇧 English", "es": "🇪🇸 Español"}[x],
+    key="lang",
+)
+
+st.sidebar.number_input(
+    t("exchange_rate_label"),
+    min_value=1.0, step=10.0,
+    key="ex_rate",
+    help=t("exchange_rate_help"),
+)
+
+st.sidebar.number_input(
+    t("percepcion_ire_label"),
+    min_value=0.0, max_value=10.0, step=0.1,
+    key="percepcion_ire_rate",
+)
+
+st.sidebar.markdown("---")
+st.sidebar.button(t("reset_button"), on_click=reset_state, type="secondary", use_container_width=True)
+st.sidebar.markdown("---")
+st.sidebar.info(t("legal_notice"))
+
+# ── Tabs ────────────────────────────────────────────
+tab_single, tab_multi = st.tabs([t("tab_single"), t("tab_multi")])
+
+# ====================================================
+# TAB 1: SINGLE PRODUCT
+# ====================================================
+with tab_single:
+    st.markdown(
+        f'<div class="calc-card"><div class="card-header">{t("single_card_header")}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    # ── Column 1: Product specs ─────────────────────
+    with col1:
+        st.markdown(t("col1_header"))
+        st.text_input(t("product_name_label"), key="p_name")
+        st.text_input(t("hs_code_label"), key="hs_code")
+
+        # HS-Code validation & warning tooltip
+        _hs = st.session_state.get("hs_code", "")
+        if _hs:
+            if not re.fullmatch(r"\d{6,10}", _hs):
+                st.warning(t("hs_code_invalid"))
+            else:
+                _hs_result = check_hs_code(_hs)
+                if _hs_result:
+                    st.markdown(f"""
+                    <div class="hs-alert">
+                        <span class="hs-alert-icon">{_hs_result['icon']} ⚠️</span>
+                        <span class="hs-alert-label">⬤ {_hs_result['authority']}</span>
+                        <div class="hs-alert-tooltip">
+                            <div class="hs-alert-authority">🏛️ {_hs_result['authority']}</div>
+                            {_hs_result['warning']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.number_input(t("product_qty_label"), min_value=0, step=1, key="p_qty")
+        st.number_input(t("fob_price_label"), min_value=0.0, step=1.0, key="p_fob_usd", help=TOOLTIPS["fob"])
+        st.number_input(t("product_weight_label"), min_value=0.0, step=0.1, key="p_weight")
+
+    # ── Column 2: Logistics ─────────────────────────
+    with col2:
+        st.markdown(t("col2_header"))
+        st.number_input(t("freight_label"), min_value=0.0, step=50.0, key="freight_usd")
+        st.number_input(t("insurance_label"), min_value=0.0, step=10.0, key="insurance_usd")
+        st.number_input(t("inland_transport_label"), min_value=0.0, step=50000.0, key="inland_pyg", help=TOOLTIPS["inlandstransport"])
+        st.checkbox(t("inland_iva_checkbox"), key="inland_iva_incl")
+
+    # ── Column 3: Customs ───────────────────────────
+    with col3:
+        st.markdown(t("col3_header"))
+        st.number_input(t("dai_rate_label"), min_value=0.0, max_value=35.0, step=1.0, key="dai_rate", help=TOOLTIPS["dai"])
+
+        st.radio(
+            t("valoracion_label"),
+            options=[0, 1],
+            format_func=lambda x: t("valoracion_opt_auto") if x == 0 else t("valoracion_opt_manual"),
+            key="val_mode",
+            help=TOOLTIPS["valoracion"],
+        )
+        if st.session_state.val_mode == 1:
+            st.number_input(t("valoracion_manual_label"), min_value=0.0, step=10000.0, key="val_pyg_input")
+
+        st.number_input(t("indi_rate_label"), min_value=0.0, max_value=10.0, step=0.5, key="indi_rate", help=TOOLTIPS["indi"])
+        st.number_input(t("canon_sofia_label"), min_value=0.0, step=10000.0, key="canon_sofia", help=TOOLTIPS["canon_sofia"])
+        st.number_input(t("consulado_label"), min_value=0.0, step=10000.0, key="consulado", help=TOOLTIPS["consulado"])
+        st.number_input(t("tasa_portuaria_label"), min_value=0.0, step=50000.0, key="tasa_portuaria", help=TOOLTIPS["tasa_portuaria"])
+        st.number_input(t("despachante_label"), min_value=0.0, step=50000.0, key="despachante", help=TOOLTIPS["despachante"])
+        st.checkbox(t("despachante_iva_checkbox"), key="despachante_iva_incl")
+        st.number_input(t("other_costs_label"), min_value=0.0, step=10000.0, key="sonstiges")
+
+    # ── Calculations ────────────────────────────────
+    ex_rate = st.session_state.ex_rate
+    p_qty = st.session_state.p_qty
+    p_fob_usd = st.session_state.p_fob_usd
+
+    total_fob_usd = p_qty * p_fob_usd
+    total_fob_pyg = total_fob_usd * ex_rate
+
+    total_freight_pyg = st.session_state.freight_usd * ex_rate
+    total_insurance_pyg = st.session_state.insurance_usd * ex_rate
+
+    cif_usd = total_fob_usd + st.session_state.freight_usd + st.session_state.insurance_usd
+    cif_pyg = cif_usd * ex_rate
+
+    # Netting inland transport
+    if st.session_state.inland_iva_incl:
+        inland_netto = st.session_state.inland_pyg / 1.1
+        inland_iva = inland_netto * 0.1
+    else:
+        inland_netto = st.session_state.inland_pyg
+        inland_iva = 0.0
+
+    # Netting despachante
+    if st.session_state.despachante_iva_incl:
+        despachante_netto = st.session_state.despachante / 1.1
+        despachante_iva = despachante_netto * 0.1
+    else:
+        despachante_netto = st.session_state.despachante
+        despachante_iva = 0.0
+
+    # Customs taxes
+    dai_pyg = cif_pyg * (st.session_state.dai_rate / 100.0)
+
+    if st.session_state.val_mode == 0:
+        val_pyg = cif_pyg * 0.005
+    else:
+        val_pyg = st.session_state.val_pyg_input
+
+    indi_pyg = dai_pyg * (st.session_state.indi_rate / 100.0)
+
+    # Capitalized cost (IAS 2)
+    capitalized_logistics = total_freight_pyg + total_insurance_pyg + inland_netto
+    capitalized_customs = (
+        dai_pyg + val_pyg + indi_pyg
+        + st.session_state.canon_sofia + st.session_state.consulado
+        + st.session_state.tasa_portuaria + despachante_netto
+        + st.session_state.sonstiges
+    )
+    total_acquisition_cost = total_fob_pyg + capitalized_logistics + capitalized_customs
+
+    if p_qty > 0:
+        unit_cost_pyg = total_acquisition_cost / p_qty
+        unit_cost_usd = unit_cost_pyg / ex_rate
+    else:
+        unit_cost_pyg = 0.0
+        unit_cost_usd = 0.0
+
+    # Tax credits (Ley 6380/19) – NOT capitalised
+    base_iva_aduana = (
+        cif_pyg + dai_pyg + val_pyg + indi_pyg
+        + st.session_state.canon_sofia + st.session_state.consulado
+        + st.session_state.tasa_portuaria
+    )
+    iva_importacion = base_iva_aduana * 0.10
+    percepcion_ire = cif_pyg * (st.session_state.percepcion_ire_rate / 100.0)
+    total_tax_credit = iva_importacion + percepcion_ire + inland_iva + despachante_iva
+
+    # ── Results ─────────────────────────────────────
+    st.markdown("---")
+    st.markdown(t("results_header"))
+
+    out_col1, out_col2 = st.columns(2)
+
+    with out_col1:
+        _sub1 = t("unit_cost_sub").format(usd=format_usd(unit_cost_usd), total=format_pyg(total_acquisition_cost))
+        st.markdown(f"""
+        <div class="box-capitalized">
+            <div class="box-title">{t('unit_cost_title')}</div>
+            <div class="box-value">{format_pyg(unit_cost_pyg)}</div>
+            <div class="box-sub">{_sub1}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with out_col2:
+        st.markdown(f"""
+        <div class="box-credit">
+            <div class="box-title">{t('tax_credit_title')}</div>
+            <div class="box-value">{format_pyg(total_tax_credit)}</div>
+            <div class="box-sub">{t('tax_credit_sub')}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# ====================================================
+# TAB 2: MULTI-PRODUCT
+# ====================================================
+with tab_multi:
+    st.markdown(
+        f'<div class="calc-card"><div class="card-header">{t("multi_card_header")}</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.write(t("multi_intro"))
+
+    # ── Product table ───────────────────────────────
+    st.markdown(t("multi_products_header"))
+
+    _col_cfg = {
+        "Produktname": st.column_config.TextColumn(t("multi_col_product")),
+        "HS-Code": st.column_config.TextColumn(t("multi_col_hscode")),
+        "Menge": st.column_config.NumberColumn(t("multi_col_qty"), min_value=0, step=1),
+        "FOB pro Stk. (USD)": st.column_config.NumberColumn(t("multi_col_fob"), min_value=0.0, step=1.0),
+        "Gewicht pro Stk. (kg)": st.column_config.NumberColumn(t("multi_col_weight"), min_value=0.0, step=0.1),
+        "DAI (%)": st.column_config.NumberColumn(t("multi_col_dai"), min_value=0.0, max_value=35.0, step=1.0),
+    }
+
+    edited_df = st.data_editor(
+        st.session_state.df_products,
+        column_config=_col_cfg,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="prod_editor",
+    )
+    st.session_state.df_products = edited_df
+
+    # ── Shared costs ────────────────────────────────
+    st.markdown("---")
+    col_l, col_c, col_k = st.columns(3)
+
+    with col_l:
+        st.markdown(t("multi_logistics_header"))
+        st.number_input(t("multi_freight_label"), min_value=0.0, step=100.0, key="multi_freight_usd")
+        st.number_input(t("multi_insurance_label"), min_value=0.0, step=20.0, key="multi_insurance_usd")
+        st.number_input(t("multi_inland_label"), min_value=0.0, step=50000.0, key="multi_inland_pyg")
+        st.checkbox(t("multi_inland_iva"), key="multi_inland_iva_incl")
+
+    with col_c:
+        st.markdown(t("multi_customs_header"))
+        st.radio(
+            t("multi_valoracion_label"),
+            options=[0, 1],
+            format_func=lambda x: t("multi_val_opt_auto") if x == 0 else t("multi_val_opt_manual"),
+            key="multi_val_mode",
+        )
+        if st.session_state.multi_val_mode == 1:
+            st.number_input(t("multi_val_manual_label"), min_value=0.0, step=50000.0, key="multi_val_pyg_manual")
+
+        st.number_input(t("multi_indi_label"), min_value=0.0, max_value=10.0, step=0.5, key="multi_indi_rate")
+        st.number_input(t("multi_canon_label"), min_value=0.0, step=10000.0, key="multi_canon_sofia")
+        st.number_input(t("multi_consulado_label"), min_value=0.0, step=20000.0, key="multi_consulado")
+        st.number_input(t("multi_tasa_label"), min_value=0.0, step=50000.0, key="multi_tasa_portuaria")
+
+    with col_k:
+        st.markdown(t("multi_services_header"))
+        st.number_input(t("multi_despachante_label"), min_value=0.0, step=50000.0, key="multi_despachante")
+        st.checkbox(t("multi_despachante_iva"), key="multi_despachante_iva_incl")
+        st.number_input(t("multi_sonstiges_label"), min_value=0.0, step=10000.0, key="multi_sonstiges")
+
+        st.markdown(t("multi_alloc_header"))
+        st.selectbox(
+            t("multi_alloc_freight_label"),
+            options=[0, 1],
+            format_func=lambda x: t("multi_alloc_freight_opt_weight") if x == 0 else t("multi_alloc_freight_opt_value"),
+            key="alloc_freight",
+            help=t("multi_alloc_freight_help"),
+        )
+        st.selectbox(
+            t("multi_alloc_local_label"),
+            options=[0, 1],
+            format_func=lambda x: t("multi_alloc_local_opt_value") if x == 0 else t("multi_alloc_local_opt_weight"),
+            key="alloc_local",
+            help=t("multi_alloc_local_help"),
+        )
+
+    # ── Calculations (multi) ───────────────────────
+    ex_rate_m = st.session_state.ex_rate
+
+    if len(edited_df) == 0:
+        st.warning(t("multi_warn_no_products"))
+    else:
+        # Netting services
+        if st.session_state.multi_inland_iva_incl:
+            m_inland_netto = st.session_state.multi_inland_pyg / 1.1
+            m_inland_iva = m_inland_netto * 0.1
+        else:
+            m_inland_netto = st.session_state.multi_inland_pyg
+            m_inland_iva = 0.0
+
+        if st.session_state.multi_despachante_iva_incl:
+            m_desp_netto = st.session_state.multi_despachante / 1.1
+            m_desp_iva = m_desp_netto * 0.1
+        else:
+            m_desp_netto = st.session_state.multi_despachante
+            m_desp_iva = 0.0
+
+        prods = edited_df.copy()
+        prods["Produktname"] = prods["Produktname"].fillna("–")
+        prods["Menge"] = pd.to_numeric(prods["Menge"], errors="coerce").fillna(0).astype(int)
+        prods["FOB pro Stk. (USD)"] = pd.to_numeric(prods["FOB pro Stk. (USD)"], errors="coerce").fillna(0.0)
+        prods["Gewicht pro Stk. (kg)"] = pd.to_numeric(prods["Gewicht pro Stk. (kg)"], errors="coerce").fillna(0.0)
+        prods["DAI (%)"] = pd.to_numeric(prods["DAI (%)"], errors="coerce").fillna(0.0)
+
+        prods["Total_FOB_USD"] = prods["Menge"] * prods["FOB pro Stk. (USD)"]
+        prods["Total_Weight_kg"] = prods["Menge"] * prods["Gewicht pro Stk. (kg)"]
+
+        sum_fob_usd = prods["Total_FOB_USD"].sum()
+        sum_weight_kg = prods["Total_Weight_kg"].sum()
+
+        if sum_fob_usd <= 0 or sum_weight_kg <= 0:
+            st.error(t("multi_error_zero"))
+        else:
+            prods["FOB_Share"] = prods["Total_FOB_USD"] / sum_fob_usd
+            prods["Weight_Share"] = prods["Total_Weight_kg"] / sum_weight_kg
+
+            # 1. Freight & Insurance allocation
+            use_weight_freight = (st.session_state.alloc_freight == 0)
+            share_freight = prods["Weight_Share"] if use_weight_freight else prods["FOB_Share"]
+            prods["Alloc_Freight_USD"] = st.session_state.multi_freight_usd * share_freight
+            prods["Alloc_Insurance_USD"] = st.session_state.multi_insurance_usd * share_freight
+            prods["Alloc_Freight_PYG"] = prods["Alloc_Freight_USD"] * ex_rate_m
+            prods["Alloc_Insurance_PYG"] = prods["Alloc_Insurance_USD"] * ex_rate_m
+
+            # 2. CIF
+            prods["CIF_USD"] = prods["Total_FOB_USD"] + prods["Alloc_Freight_USD"] + prods["Alloc_Insurance_USD"]
+            prods["CIF_PYG"] = prods["CIF_USD"] * ex_rate_m
+
+            # 3. Product-specific duties
+            prods["DAI_PYG"] = prods["CIF_PYG"] * (prods["DAI (%)"] / 100.0)
+
+            if st.session_state.multi_val_mode == 0:
+                prods["Val_PYG"] = prods["CIF_PYG"] * 0.005
+            else:
+                use_weight_local = (st.session_state.alloc_local == 1)
+                share_local_val = prods["Weight_Share"] if use_weight_local else prods["FOB_Share"]
+                prods["Val_PYG"] = st.session_state.multi_val_pyg_manual * share_local_val
+
+            prods["INDI_PYG"] = prods["DAI_PYG"] * (st.session_state.multi_indi_rate / 100.0)
+
+            # 4. Allocate common local costs
+            total_common_local = (
+                st.session_state.multi_canon_sofia
+                + st.session_state.multi_consulado
+                + st.session_state.multi_tasa_portuaria
+                + m_desp_netto
+                + st.session_state.multi_sonstiges
+                + m_inland_netto
+            )
+            use_weight_local = (st.session_state.alloc_local == 1)
+            share_local = prods["Weight_Share"] if use_weight_local else prods["FOB_Share"]
+            prods["Alloc_Local_PYG"] = total_common_local * share_local
+            prods["Alloc_TaxBase_Fees_PYG"] = (
+                st.session_state.multi_canon_sofia
+                + st.session_state.multi_consulado
+                + st.session_state.multi_tasa_portuaria
+            ) * share_local
+
+            # 5. Total capitalised cost
+            prods["Total_Capitalized_PYG"] = (
+                prods["Total_FOB_USD"] * ex_rate_m
+                + prods["Alloc_Freight_PYG"]
+                + prods["Alloc_Insurance_PYG"]
+                + prods["DAI_PYG"]
+                + prods["Val_PYG"]
+                + prods["INDI_PYG"]
+                + prods["Alloc_Local_PYG"]
+            )
+            prods["Stückkosten_PYG"] = prods.apply(
+                lambda r: r["Total_Capitalized_PYG"] / r["Menge"] if r["Menge"] > 0 else 0, axis=1
+            )
+            prods["Stückkosten_USD"] = prods["Stückkosten_PYG"] / ex_rate_m
+
+            # 6. Tax credits
+            prods["IVA_Base_PYG"] = (
+                prods["CIF_PYG"] + prods["DAI_PYG"] + prods["Val_PYG"]
+                + prods["INDI_PYG"] + prods["Alloc_TaxBase_Fees_PYG"]
+            )
+            prods["IVA_Importacion_PYG"] = prods["IVA_Base_PYG"] * 0.10
+            prods["Percepcion_IRE_PYG"] = prods["CIF_PYG"] * (st.session_state.percepcion_ire_rate / 100.0)
+
+            prods["Alloc_Inland_IVA"] = m_inland_iva * share_local
+            prods["Alloc_Broker_IVA"] = m_desp_iva * share_local
+
+            prods["Total_Tax_Credit_PYG"] = (
+                prods["IVA_Importacion_PYG"] + prods["Percepcion_IRE_PYG"]
+                + prods["Alloc_Inland_IVA"] + prods["Alloc_Broker_IVA"]
+            )
+
+            total_shipment_cap = prods["Total_Capitalized_PYG"].sum()
+            total_shipment_credit = prods["Total_Tax_Credit_PYG"].sum()
+
+            # ── Results ─────────────────────────────
+            st.markdown("---")
+            st.markdown(t("multi_results_header"))
+
+            s1, s2 = st.columns(2)
+            with s1:
+                _sub_m1 = t("multi_cap_sub").format(usd=format_usd(total_shipment_cap / ex_rate_m))
+                st.markdown(f"""
+                <div class="box-capitalized">
+                    <div class="box-title">{t('multi_cap_title')}</div>
+                    <div class="box-value">{format_pyg(total_shipment_cap)}</div>
+                    <div class="box-sub">{_sub_m1}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with s2:
+                _sub_m2 = t("multi_credit_sub").format(
+                    iva=format_pyg(prods["IVA_Importacion_PYG"].sum()),
+                    perc=format_pyg(prods["Percepcion_IRE_PYG"].sum()),
+                    svc=format_pyg(m_inland_iva + m_desp_iva),
+                )
+                st.markdown(f"""
+                <div class="box-credit">
+                    <div class="box-title">{t('multi_credit_title')}</div>
+                    <div class="box-value">{format_pyg(total_shipment_credit)}</div>
+                    <div class="box-sub">{_sub_m2}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── Result table ────────────────────────
+            result_display = pd.DataFrame({
+                t("res_col_product"): prods["Produktname"],
+                t("res_col_qty"): prods["Menge"],
+                t("res_col_fob"): prods["Total_FOB_USD"],
+                t("res_col_weight"): prods["Total_Weight_kg"].map(lambda x: f"{x:,.1f} kg"),
+                t("res_col_cif"): prods["CIF_PYG"],
+                t("res_col_dai"): prods["DAI_PYG"],
+                t("res_col_other"): prods["Val_PYG"] + prods["INDI_PYG"] + prods["Alloc_Local_PYG"],
+                t("res_col_total"): prods["Total_Capitalized_PYG"],
+                t("res_col_unit_pyg"): prods["Stückkosten_PYG"],
+                t("res_col_unit_usd"): prods["Stückkosten_USD"],
+                t("res_col_credit"): prods["Total_Tax_Credit_PYG"],
+            })
+
+            def _fmt_pyg(x):
+                return f"₲ {int(round(x)):,}".replace(",", ".")
+
+            st.markdown(t("multi_table_header"))
+            fmt_dict = {
+                t("res_col_fob"): lambda x: f"$ {x:,.2f}",
+                t("res_col_cif"): _fmt_pyg,
+                t("res_col_dai"): _fmt_pyg,
+                t("res_col_other"): _fmt_pyg,
+                t("res_col_total"): _fmt_pyg,
+                t("res_col_unit_pyg"): _fmt_pyg,
+                t("res_col_unit_usd"): lambda x: f"$ {x:,.2f}",
+                t("res_col_credit"): _fmt_pyg,
+            }
+            st.dataframe(
+                result_display.style.format(fmt_dict),
+                use_container_width=True,
+            )
+
+            # CSV download
+            csv_buf = io.StringIO()
+            prods.to_csv(csv_buf, index=False, sep=";")
+            st.download_button(
+                label=t("multi_csv_button"),
+                data=csv_buf.getvalue(),
+                file_name=t("multi_csv_filename"),
+                mime="text/csv",
+            )
+
+            # ── Charts ──────────────────────────────
+            st.markdown("---")
+            ch1, ch2 = st.columns(2)
+
+            with ch1:
+                st.markdown(t("multi_chart_products"))
+                fig_p, ax_p = plt.subplots(figsize=(6, 6))
+                prod_labels = prods["Produktname"].tolist()
+                prod_costs = prods["Total_Capitalized_PYG"].tolist()
+                labels_w_price = [f"{n} ({format_pyg(c)})" for n, c in zip(prod_labels, prod_costs)]
+                fig_p.patch.set_alpha(0.0)
+                ax_p.patch.set_alpha(0.0)
+                w, _, at = ax_p.pie(
+                    prod_costs, labels=None, autopct="%1.1f%%",
+                    startangle=140, textprops=dict(color="w", weight="bold"), pctdistance=0.75,
+                )
+                ax_p.legend(w, labels_w_price, title=t("multi_legend_products"), loc="center", bbox_to_anchor=(0.5, -0.15))
+                st.pyplot(fig_p)
+
+            with ch2:
+                st.markdown(t("multi_chart_types"))
+                fig_t, ax_t = plt.subplots(figsize=(6, 6))
+                fob_all = sum_fob_usd * ex_rate_m
+                intl_all = (st.session_state.multi_freight_usd + st.session_state.multi_insurance_usd) * ex_rate_m
+                customs_all = (
+                    prods["DAI_PYG"].sum() + prods["Val_PYG"].sum() + prods["INDI_PYG"].sum()
+                    + st.session_state.multi_canon_sofia + st.session_state.multi_consulado
+                    + st.session_state.multi_tasa_portuaria
+                )
+                local_all = m_desp_netto + st.session_state.multi_sonstiges + m_inland_netto
+
+                ct_labels = [
+                    f"{t('multi_chart_fob')} ({format_pyg(fob_all)})",
+                    f"{t('multi_chart_freight')} ({format_pyg(intl_all)})",
+                    f"{t('multi_chart_customs')} ({format_pyg(customs_all)})",
+                    f"{t('multi_chart_local')} ({format_pyg(local_all)})",
+                ]
+                ct_sizes = [fob_all, intl_all, customs_all, local_all]
+                ct_colors = ["#1e3c72", "#3a7bd5", "#f39c12", "#7f8c8d"]
+
+                fig_t.patch.set_alpha(0.0)
+                ax_t.patch.set_alpha(0.0)
+                wt, _, att = ax_t.pie(
+                    ct_sizes, labels=None, autopct="%1.1f%%",
+                    startangle=140, colors=ct_colors,
+                    textprops=dict(color="w", weight="bold"), pctdistance=0.75,
+                )
+                ax_t.legend(wt, ct_labels, title=t("multi_legend_types"), loc="center", bbox_to_anchor=(0.5, -0.15))
+                st.pyplot(fig_t)
+
+
+# ====================================================
+# FOOTER
+# ====================================================
+st.markdown("---")
+st.markdown(t("footer_header"))
+
+info_c1, info_c2 = st.columns(2)
+with info_c1:
+    st.markdown(f"""
+    * 📜 **DAI:** {TOOLTIPS["dai"]}
+    * ⚖️ **Valoración Aduanera:** {TOOLTIPS["valoracion"]}
+    * 👥 **INDI (Ley 582/80):** {TOOLTIPS["indi"]}
+    * 💻 **Canon SOFIA:** {TOOLTIPS["canon_sofia"]}
+    """)
+with info_c2:
+    st.markdown(f"""
+    * ⚓ **Tasa Portuaria:** {TOOLTIPS["tasa_portuaria"]}
+    * 👔 **Despachante:** {TOOLTIPS["despachante"]}
+    * 💰 **IVA Importación (10 %):** {TOOLTIPS["iva_importacion"]}
+    * 💵 **Percepción IRE:** {TOOLTIPS["percepcion_ire"]}
+    """)
+
+# ====================================================
+# PERSIST STATE (runs at end of every script execution)
+# ====================================================
+save_state()
