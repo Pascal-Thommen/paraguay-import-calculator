@@ -69,6 +69,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": {
         # Sidebar
         "lang_selector": "🌐 Sprache",
+        "zone_label": "Herkunftszone",
+        "zone_help": "Beeinflusst DAI-Zollsatz und Frachtschaetzungen je nach Herkunftsregion",
         "sidebar_global_params": "### 🌍 Globale Parameter",
         "exchange_rate_label": "Wechselkurs (PYG/USD)",
         "exchange_rate_help": "Aktueller Wechselkurs Paraguayischer Guaraní zu US‑Dollar.",
@@ -169,7 +171,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "multi_credit_sub": "Zoll‑IVA ({iva}) + Percepción ({perc}) + Service‑IVA ({svc})",
         "multi_table_header": "**Ergebnis‑Übersicht je Produkt**",
         "multi_csv_button": "📥 Verteilungsbogen als CSV exportieren",
+        "multi_xlsx_button": "📥 Verteilungsbogen als Excel exportieren",
         "multi_csv_filename": "import_kalkulation_mehrprodukt.csv",
+        "multi_xlsx_filename": "import_kalkulation_mehrprodukt.xlsx",
         "multi_chart_products": "**Anschaffungskosten nach Produkt**",
         "multi_chart_types": "**Verteilung nach Kostenart**",
         "multi_legend_products": "Produkte",
@@ -196,6 +200,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # -----------------------------------------------------------------
     "en": {
         "lang_selector": "🌐 Language",
+        "zone_label": "Origin Zone",
+        "zone_help": "Affects DAI tariff rate and freight estimates by origin region",
         "sidebar_global_params": "### 🌍 Global Parameters",
         "exchange_rate_label": "Exchange rate (PYG/USD)",
         "exchange_rate_help": "Current exchange rate Paraguayan Guaraní to US Dollar.",
@@ -282,7 +288,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "multi_credit_sub": "Customs IVA ({iva}) + Percepción ({perc}) + Service IVA ({svc})",
         "multi_table_header": "**Result overview per product**",
         "multi_csv_button": "📥 Export allocation sheet as CSV",
+        "multi_xlsx_button": "📥 Export allocation sheet as Excel",
         "multi_csv_filename": "import_calculation_multiproduct.csv",
+        "multi_xlsx_filename": "import_calculation_multiproduct.xlsx",
         "multi_chart_products": "**Acquisition cost by product**",
         "multi_chart_types": "**Cost breakdown by type**",
         "multi_legend_products": "Products",
@@ -307,6 +315,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # -----------------------------------------------------------------
     "es": {
         "lang_selector": "🌐 Idioma",
+        "zone_label": "Zona de origen",
+        "zone_help": "Afecta la tasa DAI y estimaciones de flete segun region de origen",
         "sidebar_global_params": "### 🌍 Parámetros globales",
         "exchange_rate_label": "Tipo de cambio (PYG/USD)",
         "exchange_rate_help": "Tipo de cambio actual Guaraní paraguayo a Dólar estadounidense.",
@@ -393,7 +403,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "multi_credit_sub": "IVA aduanero ({iva}) + Percepción ({perc}) + IVA servicios ({svc})",
         "multi_table_header": "**Resumen por producto**",
         "multi_csv_button": "📥 Exportar prorrateo como CSV",
+        "multi_xlsx_button": "📥 Exportar prorrateo como Excel",
         "multi_csv_filename": "calculo_importacion_multiproducto.csv",
+        "multi_xlsx_filename": "calculo_importacion_multiproducto.xlsx",
         "multi_chart_products": "**Costo de adquisición por producto**",
         "multi_chart_types": "**Desglose por tipo de costo**",
         "multi_legend_products": "Productos",
@@ -1316,4 +1328,58 @@ def _test_claude(config):
             return {'ok': True, 'model': data.get('model','?'), 'provider': 'claude'}
     except Exception as e:
         return {'ok': False, 'error': str(e)[:200]}
+
+
+import io
+
+def export_to_excel(df, sheet_name="Kalkulation", filename_prefix="export"):
+    """Export a DataFrame to Excel bytes with formatting.
+    
+    Returns:
+        BytesIO object ready for st.download_button()
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side, numbers
+    from openpyxl.utils import get_column_letter
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31]  # Excel sheet name max 31 chars
+    
+    # Header style
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="1E3C72", end_color="1E3C72", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin")
+    )
+    
+    # Write headers
+    for col_idx, col_name in enumerate(df.columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = thin_border
+    
+    # Write data
+    for row_idx, row in enumerate(df.itertuples(index=False), 2):
+        for col_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="right" if isinstance(value, (int, float)) else "left")
+    
+    # Auto-fit column widths
+    for col_idx, col_name in enumerate(df.columns, 1):
+        max_width = max(
+            len(str(col_name)),
+            max((len(str(val)) for val in df[col_name].astype(str)), default=0)
+        )
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width + 3, 40)
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 

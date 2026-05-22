@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import io
 import re
 from helpers import (
+    export_to_excel,
     t, check_hs_code,
     load_state, save_state, reset_state, init_defaults,
     DEFAULTS, TRANSLATIONS,
@@ -59,6 +60,25 @@ def on_product_name_change():
             st.session_state["_hs_source"] = "ai"
             st.session_state["_hs_label"] = ai_result.get("explanation", "KI-ermittelt")
             track_ai_tokens(ai_result.get("tokens_used", 0), cfg)
+
+
+# ============================================================
+# ZONE-BASED RATES (DAI by origin, freight by zone & mode)
+# ============================================================
+ZONE_DAI_RATES = {
+    "Mercosur": 0.0,
+    "Europa": 14.0,
+    "USA": 10.0,
+    "Asien": 14.0,
+    "Sonstige": 16.0,
+}
+ZONE_FREIGHT_RATES = {
+    "Mercosur": {"sea": 0.30, "air": 2.50},
+    "Europa": {"sea": 0.80, "air": 5.00},
+    "USA": {"sea": 0.70, "air": 4.00},
+    "Asien": {"sea": 0.60, "air": 3.50},
+    "Sonstige": {"sea": 0.75, "air": 4.00},
+}
 
 # ----------------------------------------------------
 # Page Configuration & Styling
@@ -292,6 +312,17 @@ st.markdown("""
         .box-value { font-size: 1.1rem !important; }
         .stDataFrame { font-size: 0.8rem !important; }
     }
+    /* --- DB-loaded / auto-filled fields: gray tint --- */
+    input.db-loaded, .db-loaded input {
+        background-color: #f0f3f7 !important;
+        color: #444 !important;
+        border-color: #ccd !important;
+    }
+    .db-hint {
+        font-size: 0.72em;
+        color: #999;
+        font-style: italic;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -344,6 +375,12 @@ st.sidebar.selectbox(
     key="lang",
 )
 
+st.sidebar.selectbox(
+    t("zone_label"),
+    options=["Mercosur", "Europa", "USA", "Asien", "Sonstige"],
+    key="selected_zone",
+    help=t("zone_help"),
+)
 st.sidebar.number_input(
     t("exchange_rate_label"),
     min_value=1.0, step=10.0,
@@ -358,7 +395,7 @@ st.sidebar.number_input(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.button(t("reset_button"), on_click=reset_state, type="secondary", width='stretch')
+st.sidebar.button(t("reset_button"), on_click=reset_state, type="secondary", use_container_width=True)
 st.sidebar.markdown("---")
 st.sidebar.info(t("legal_notice"))
 
@@ -477,7 +514,11 @@ if not _is_multi:
 
         st.number_input(t("product_qty_label"), min_value=0, step=1, key="p_qty")
         st.number_input(t("fob_price_label"), min_value=0.0, step=1.0, key="p_fob_usd", help=TOOLTIPS["fob"])
+        if st.session_state.get("_hs_source") == "db":
+            st.caption('<span class="db-hint">DB: {st.session_state.get("hs_code","")}</span>', unsafe_allow_html=True)
         st.number_input(t("product_weight_label"), min_value=0.0, step=0.1, key="p_weight")
+        if st.session_state.get("_hs_source") == "db":
+            st.caption('<span class="db-hint">DB-Wert</span>', unsafe_allow_html=True)
 
     # ── Column 2: Logistics ─────────────────────────
     with col2:
@@ -490,17 +531,15 @@ if not _is_multi:
     # ── Column 3: Customs ───────────────────────────
     with col3:
         st.markdown(t("col3_header"))
-        st.number_input(t("dai_rate_label"), min_value=0.0, max_value=35.0, step=1.0, key="dai_rate", help=TOOLTIPS["dai"])
+        zone_dai = ZONE_DAI_RATES.get(st.session_state.get("selected_zone", "Sonstige"), 10.0)
+        st.number_input(t("dai_rate_label"), min_value=0.0, max_value=35.0, value=float(zone_dai), step=1.0, key="dai_rate", help=TOOLTIPS["dai"])
+        if st.session_state.get("_hs_source") == "db":
+            st.caption('<span class="db-hint">DB-Wert</span>', unsafe_allow_html=True)
 
-        st.radio(
-            t("valoracion_label"),
-            options=[0, 1],
-            format_func=lambda x: t("valoracion_opt_auto") if x == 0 else t("valoracion_opt_manual"),
-            key="val_mode",
-            help=TOOLTIPS["valoracion"],
-        )
-        if st.session_state.val_mode == 1:
-            st.number_input(t("valoracion_manual_label"), min_value=0.0, step=10000.0, key="val_pyg_input")
+        # Valoracion Aduanera: 0.5% CIF is legally fixed
+        st.markdown("Valoracion Aduanera: **0,5 % des CIF-Werts** \U0001f512 (gesetzlich festgelegt)")
+        st.session_state.val_mode = 0
+        st.session_state.val_pyg_input = 0.0
 
         st.number_input(t("indi_rate_label"), min_value=0.0, max_value=10.0, step=0.5, key="indi_rate", help=TOOLTIPS["indi"])
         st.number_input(t("canon_sofia_label"), min_value=0.0, step=10000.0, key="canon_sofia", help=TOOLTIPS["canon_sofia"])
@@ -648,14 +687,10 @@ if _is_multi:
 
     with col_c:
         st.markdown(t("multi_customs_header"))
-        st.radio(
-            t("multi_valoracion_label"),
-            options=[0, 1],
-            format_func=lambda x: t("multi_val_opt_auto") if x == 0 else t("multi_val_opt_manual"),
-            key="multi_val_mode",
-        )
-        if st.session_state.multi_val_mode == 1:
-            st.number_input(t("multi_val_manual_label"), min_value=0.0, step=50000.0, key="multi_val_pyg_manual")
+        # Valoracion Aduanera: 0.5% CIF is legally fixed
+        st.markdown("Valoracion Aduanera: **0,5 % des CIF-Werts** \U0001f512 (gesetzlich festgelegt)")
+        st.session_state.multi_val_mode = 0
+        st.session_state.multi_val_pyg_manual = 0.0
 
         st.number_input(t("multi_indi_label"), min_value=0.0, max_value=10.0, step=0.5, key="multi_indi_rate")
         st.number_input(t("multi_canon_label"), min_value=0.0, step=10000.0, key="multi_canon_sofia")

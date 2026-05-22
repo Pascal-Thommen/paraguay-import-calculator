@@ -7,3 +7,7 @@ __pycache__/
 config.json
 data/usage.db
 *.log
+__pycache__/
+*.pyc
+*.db
+data/products_hs.db
