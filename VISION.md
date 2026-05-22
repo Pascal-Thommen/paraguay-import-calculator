@@ -24,9 +24,9 @@ Container (172.18.0.2)          Host (172.18.0.1)
 ```
 
 ## Deployment
-- Port: 8502 -> 8501 (container internal)
-- Command: `podman run -d --name paraguay-calc -p 8502:8501 --restart unless-stopped paraguay-calc:latest`
-- URL: http://localhost:8502 (host), http://172.18.0.1:8502 (container)
+- Port: 8501 -> 8501 (container internal)
+- Command: `podman run -d --name paraguay-calc -p 8501:8501 --restart unless-stopped paraguay-calc:latest`
+- URL: http://localhost:8501 (host), http://172.18.0.1:8501 (container)
 
 ## Component Status
 
@@ -42,7 +42,7 @@ Container (172.18.0.2)          Host (172.18.0.1)
 
 - [x] HS-Code Autocomplete (4+ digits triggers DB suggestions)
 - [x] Multi-product DB Product Picker (add to table with quantity)
-- [x] auto-deploy.sh (adapted for paraguay-calc, port 8502)
+- [x] auto-deploy.sh (adapted for paraguay-calc, port 8501)
 - [ ] Tests (tests_calculator.py exists in old project)
 
 ## Technical Details
@@ -60,12 +60,12 @@ podman build -t paraguay-calc:latest .
 
 # Deploy
 podman stop paraguay-calc && podman rm paraguay-calc
-podman run -d --name paraguay-calc -p 8502:8501 --restart unless-stopped paraguay-calc:latest
+podman run -d --name paraguay-calc -p 8501:8501 --restart unless-stopped paraguay-calc:latest
 
 # Check
 podman logs paraguay-calc
 podman ps --filter name=paraguay-calc
-curl http://localhost:8502/
+curl http://localhost:8501/
 ```
 
 ### File Paths
@@ -76,7 +76,7 @@ curl http://localhost:8502/
 ## Session Log
 | Date       | Changes                                                   |
 | 2026-05-20 | Initial setup: SSH key, project clone                     |
-| 2026-05-21 | Dockerfile fix, DB integration, deploy on 8502            |
+| 2026-05-21 | Dockerfile fix, DB integration, deploy on 8501            |
 | 2026-05-21 | DB expander + HS autocomplete in single-product tab        |
 | 2026-05-21 | calc_single_product / calc_multi_product extracted        |
 | 2026-05-21 | use_container_width fixed, auto-deploy.sh created         |
