@@ -1,3 +1,4 @@
+from pdf_export import export_to_pdf
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -606,6 +607,16 @@ if not _is_multi:
         </div>
         """, unsafe_allow_html=True)
 
+    # PDF export (single product)
+    _pdf_single = export_to_pdf(_r, language=st.session_state.get("lang", "de"), filename="/tmp/calculation_single.pdf")
+    with open(_pdf_single, "rb") as f:
+        st.download_button(
+            label=t("pdf_download"),
+            data=f,
+            file_name=t("pdf_filename"),
+            mime="application/pdf",
+        )
+
 
 # ====================================================
 # MULTI-PRODUCT MODE (2+ products)
@@ -823,6 +834,16 @@ if _is_multi:
             file_name=t("multi_csv_filename"),
             mime="text/csv",
         )
+
+        # PDF export (multi-product)
+        _pdf_multi = export_to_pdf(prods, language=st.session_state.get("lang", "de"), filename="/tmp/calculation_multi.pdf")
+        with open(_pdf_multi, "rb") as f:
+            st.download_button(
+                label=t("pdf_download"),
+                data=f,
+                file_name=t("multi_pdf_filename"),
+                mime="application/pdf",
+            )
 
         # ── Charts ──────────────────────────────
         st.markdown("---")
