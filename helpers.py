@@ -1,6 +1,10 @@
 """
 helpers.py – translations, HS‑code rules, and state persistence
 for the Paraguay Import Cost Calculator.
+
+.. deprecated::
+    Die Berechnungsfunktionen ``calc_single_product`` und ``calc_multi_product``
+    wurden nach :mod:`calculator` ausgelagert. Verwende ``calculator.py`` stattdessen.
 """
 import streamlit as st
 import json
@@ -889,9 +893,12 @@ def get_product_categories() -> list[str]:
 
 # =====================================================================
 # CALCULATION ENGINE  –  pure functions
+# .. deprecated:: Verwende stattdessen calculator.py
 # =====================================================================
 
 def calc_single_product(params: dict, ex_rate: float, percep_ire_rate: float) -> dict:
+    import warnings
+    warnings.warn("Verwende stattdessen calculator.calc_single_product", DeprecationWarning, stacklevel=2)
     """Calculate single-product import costs.
 
     Args:
@@ -1025,6 +1032,8 @@ def calc_multi_product(
     alloc_freight: int,  # 0=weight, 1=value
     alloc_local: int,    # 0=value, 1=weight
 ) -> dict:
+    import warnings
+    warnings.warn("Verwende stattdessen calculator.calc_multi_product", DeprecationWarning, stacklevel=2)
     """Calculate multi-product import costs.
 
     Returns:

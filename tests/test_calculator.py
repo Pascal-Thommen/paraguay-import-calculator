@@ -25,7 +25,8 @@ import pytest
 # Ensure helpers.py is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from helpers import calc_single_product, calc_multi_product
+from calculator import calc_single_product, calc_multi_product
+from helpers import calc_single_product as helpers_calc_single, calc_multi_product as helpers_calc_multi
 
 
 # ============================================================================
