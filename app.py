@@ -341,11 +341,20 @@ if page == "🧮 Kalkulator":
         else:
             st.session_state.exchange_rate_flete = number_input(t("wechselkurs_flete"), st.session_state.exchange_rate_flete, 100.0, "inp_xfl")
     with cfw3:
-        # Seguro % — bidirektional: ändert User pct → betrag folgt; ändert User betrag → pct folgt
+        # Seguro % — computed from FOB via seguro_percent
         new_spct = number_input(t("seguro_pct"), st.session_state.seguro_pct, 0.5, "inp_seg", min_value=0.0, max_value=100.0)
         if abs(new_spct - st.session_state.seguro_pct) > 0.001:
             st.session_state.seguro_pct = new_spct
             st.rerun()
+
+    # Computed seguro display (read-only, derived from FOB × seguro%)
+    if st.session_state.result:
+        r_s = st.session_state.result
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.markdown(f'<div class="value-box fob">Seguro ({st.session_state.currency_fob})<br><b>{_fmt(r_s["seguro_currency"])}</b></div>', unsafe_allow_html=True)
+        with sc2:
+            st.markdown(f'<div class="value-box fob">Seguro Gs<br><b>{_fmt(r_s["seguro_gs"])} Gs</b></div>', unsafe_allow_html=True)
 
     # ── Flete Table ─────────────────────────────────────────────────────────────
     fle = st.session_state.flete_items
@@ -356,17 +365,7 @@ if page == "🧮 Kalkulator":
         with c1:
             item["descripcion"] = st.text_input(t("descripcion"), item.get("descripcion", ""), key=f"fd_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c2:
-            # Seguro row: bidirectional — Betrag aus pct berechnet, editierbar
-            if item.get("descripcion", "").lower().startswith("seguro"):
-                seg_display = (st.session_state.result or {}).get("seguro_currency", 0.0) if st.session_state.result else 0.0
-                new_sbetrag = number_input(t("betrag"), seg_display, 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
-                if abs(new_sbetrag - seg_display) > 0.001:
-                    fob = (st.session_state.result or {}).get("fob_currency", 0.0) if st.session_state.result else 0.0
-                    if fob > 0:
-                        st.session_state.seguro_pct = (new_sbetrag / fob) * 100
-                    st.rerun()
-            else:
-                item["betrag"] = number_input(t("betrag"), item.get("betrag", 0.0), 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
+            item["betrag"] = number_input(t("betrag"), item.get("betrag", 0.0), 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c3:
             opts = ["maseinheit", "wert", "cantidad"]
             cur = item.get("aufteilung", "maseinheit")

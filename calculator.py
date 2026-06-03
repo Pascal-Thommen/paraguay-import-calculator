@@ -29,7 +29,6 @@ IMPORTACION_DEFAULTS = [
 
 FLETE_DEFAULTS = [
     {"descripcion": "Flete internacional", "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
-    {"descripcion": "Seguro",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
 ]
 
 NACIONAL_DEFAULTS = [
@@ -108,8 +107,12 @@ def calculate(
         iva_f = _iva_factor(it.get("impuesto", "Exento"))
 
         if it["descripcion"].lower().startswith("seguro"):
-            betrag_pyg = seguro_gs
-            display_betrag = seguro_currency
+            # Insurance is computed separately from seguro_percent (see §2 above).
+            # Skip seguro rows here — do NOT add to flete_total_gs.
+            # This prevents overwriting any user-entered value AND prevents
+            # double-counting insurance in CIF (cif_gs already adds seguro_gs).
+            betrag_pyg = 0.0
+            display_betrag = 0.0
         elif it.get("aufteilung") == "masseinheit":
             betrag_pyg = it["betrag"] * exchange_rate_flete * total_peso
             display_betrag = it["betrag"] * total_peso
