@@ -1,6 +1,6 @@
 """
-database.py — PostgreSQL connection for Paraguay Import Calculator.
-Replaces SQLite. Single container, direct DB access.
+database.py — PostgreSQL connection for Paraguay Import Calculator v5.
+Single container, direct DB access. No seguro fields.
 """
 import os
 import psycopg2
@@ -56,27 +56,23 @@ def save_calculation(data: dict) -> int:
             )
             calc_id = cur.fetchone()[0]
 
-            # Save inputs
+            # Save inputs (v5 — no seguro fields, no cif_usd)
             cur.execute(
                 """INSERT INTO calc_inputs (calculation_id, currency_fob, exchange_rate_fob,
-                   purchase_unit, seguro_percent, currency_flete, exchange_rate_flete,
-                   fob_currency, fob_gs, seguro_currency, seguro_gs,
-                   cif_currency, cif_gs, total_importacion, total_nacional,
-                   gran_total, gran_total_per_unit)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   purchase_unit, currency_flete, exchange_rate_flete,
+                   fob_currency, fob_gs, cif_currency, cif_gs,
+                   total_importacion, total_nacional, gran_total, gran_total_per_unit)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     calc_id,
                     data.get("currency_fob", "USD"),
                     data.get("exchange_rate_fob", 7500.0),
                     data.get("purchase_unit", "kg"),
-                    data.get("seguro_percent", 2.0),
                     data.get("currency_flete", "USD"),
                     data.get("exchange_rate_flete", 7500.0),
                     data.get("fob_currency", 0.0),
                     data.get("fob_gs", 0.0),
-                    data.get("seguro_currency", 0.0),
-                    data.get("seguro_gs", 0.0),
-                    data.get("cif_usd", 0.0),
+                    data.get("cif_currency", 0.0),
                     data.get("cif_gs", 0.0),
                     data.get("total_importacion", 0.0),
                     data.get("total_nacional", 0.0),

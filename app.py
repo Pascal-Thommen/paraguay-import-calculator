@@ -64,7 +64,7 @@ TR = {
         "purchase_unit": "Einkaufsmaßeinheit (m², kg, t, ...)",
         "proveedor": "📦 Proveedor (Lieferant)",
         "flete": "🚢 Flete Internacional",
-        "importacion": "🏛️ Importación (Zollabgaben)",
+        "importacion": "🏛️ Importación",
         "costo_nacional": "🚛 Costo Nacional",
         "descripcion": "Beschreibung",
         "betrag": "Betrag",
@@ -83,9 +83,8 @@ TR = {
         "gran_total": "Gran Total",
         "fob_currency": "FOB (Währung)",
         "fob_gs": "FOB (Gs)",
-        "cif_usd": "CIF USD",
+        "cif_currency": "CIF (Währung)",
         "cif_gs": "CIF Gs",
-        "seguro_pct": "Seguro % auf FOB",
         "waehrung_flete": "Flete-Währung",
         "wechselkurs_flete": "Wechselkurs (Flete)",
         "betrag_ohne_iva": "Betrag ohne IVA",
@@ -117,9 +116,8 @@ TR = {
         "gran_total": "Grand Total",
         "fob_currency": "FOB (Currency)",
         "fob_gs": "FOB (Gs)",
-        "cif_usd": "CIF USD",
+        "cif_currency": "CIF (Currency)",
         "cif_gs": "CIF Gs",
-        "seguro_pct": "Insurance % on FOB",
         "waehrung_flete": "Freight Currency",
         "wechselkurs_flete": "Exchange Rate (Freight)",
         "betrag_ohne_iva": "Amount excl. IVA",
@@ -132,7 +130,7 @@ TR = {
         "purchase_unit": "Unidad de Compra (m², kg, t, ...)",
         "proveedor": "📦 Proveedor",
         "flete": "🚢 Flete Internacional",
-        "importacion": "🏛️ Importación (Aranceles)",
+        "importacion": "🏛️ Importación",
         "costo_nacional": "🚛 Costo Nacional",
         "descripcion": "Descripción",
         "betrag": "Importe",
@@ -151,9 +149,8 @@ TR = {
         "gran_total": "Gran Total",
         "fob_currency": "FOB (Moneda)",
         "fob_gs": "FOB (Gs)",
-        "cif_usd": "CIF USD",
+        "cif_currency": "CIF (Moneda)",
         "cif_gs": "CIF Gs",
-        "seguro_pct": "Seguro % sobre FOB",
         "waehrung_flete": "Moneda Flete",
         "wechselkurs_flete": "Tipo de Cambio (Flete)",
         "betrag_ohne_iva": "Importe sin IVA",
@@ -190,8 +187,8 @@ st.markdown(f'<div class="main-header"><h1>{t("title")}</h1><p>{t("subtitle")}</
 
 # ── Session State Init ──────────────────────────────────────────────────────
 defaults = {
-    "currency_fob": "USD", "exchange_rate_fob": 7500.0, "exchange_rate_usd": 7500.0, "purchase_unit": "kg",
-    "currency_flete": "USD", "exchange_rate_flete": 7500.0, "exchange_rate_common": 7500.0, "seguro_pct": 2.0,
+    "currency_fob": "USD", "exchange_rate_fob": 7500.0, "purchase_unit": "kg",
+    "currency_flete": "USD", "exchange_rate_flete": 7500.0,
     "result": None, "calc_id": None, "calc_name": "",
     "proveedor_items": [dict(PROVEEDOR_DEFAULTS[0])],
     "flete_items": [dict(d) for d in FLETE_DEFAULTS],
@@ -247,8 +244,6 @@ def recalc():
             costo_nacional=st.session_state.nacional_items,
             exchange_rate_fob=st.session_state.exchange_rate_fob,
             exchange_rate_flete=st.session_state.exchange_rate_flete,
-            exchange_rate_usd=st.session_state.exchange_rate_usd,
-            seguro_percent=st.session_state.seguro_pct,
         )
         st.session_state.result = result
     except Exception as e:
@@ -268,7 +263,7 @@ if page == "🧮 Kalkulator":
 
     # ── Proveedor Header Inputs ─────────────────────────────────────────────────
     st.subheader(t("proveedor"))
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         st.session_state.currency_fob = st.text_input(t("currency_fob"), st.session_state.currency_fob, key="inp_cfob")
     with col2:
@@ -282,11 +277,9 @@ if page == "🧮 Kalkulator":
             st.session_state.exchange_rate_flete = st.session_state.exchange_rate_common
         else:
             st.session_state.exchange_rate_fob = number_input(t("exchange_fob"), st.session_state.exchange_rate_fob, 100.0, "inp_xfob")
-    with col3:
-        st.session_state.exchange_rate_usd = number_input("USD/PYG Referenzkurs", st.session_state.exchange_rate_usd, 100.0, "inp_xusd", min_value=1.0)
 
-    col4 = st.columns(1)[0]
-    with col4:
+    col3 = st.columns(1)[0]
+    with col3:
         st.session_state.purchase_unit = st.text_input(t("purchase_unit"), st.session_state.purchase_unit, key="inp_unit")
 
     # ── Proveedor Table ─────────────────────────────────────────────────────────
@@ -327,7 +320,7 @@ if page == "🧮 Kalkulator":
 
     # ── Flete Header Inputs ─────────────────────────────────────────────────────
     st.subheader(t("flete"))
-    cfw1, cfw2, cfw3 = st.columns(3)
+    cfw1, cfw2 = st.columns(2)
     with cfw1:
         st.session_state.currency_flete = st.text_input(t("waehrung_flete"), st.session_state.currency_flete, key="inp_cfl")
     with cfw2:
@@ -339,39 +332,26 @@ if page == "🧮 Kalkulator":
             st.session_state.exchange_rate_fob = sync_rate
         else:
             st.session_state.exchange_rate_flete = number_input(t("wechselkurs_flete"), st.session_state.exchange_rate_flete, 100.0, "inp_xfl")
-    with cfw3:
-        # Seguro % — computed from FOB via seguro_percent
-        new_spct = number_input(t("seguro_pct"), st.session_state.seguro_pct, 0.5, "inp_seg", min_value=0.0, max_value=100.0)
-        if abs(new_spct - st.session_state.seguro_pct) > 0.001:
-            st.session_state.seguro_pct = new_spct
-            st.rerun()
-
-    # Computed seguro display (read-only, derived from FOB × seguro%)
-    if st.session_state.result:
-        r_s = st.session_state.result
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            st.markdown(f'<div class="value-box fob">Seguro ({st.session_state.currency_fob})<br><b>{_fmt(r_s["seguro_currency"])}</b></div>', unsafe_allow_html=True)
-        with sc2:
-            st.markdown(f'<div class="value-box fob">Seguro Gs<br><b>{_fmt(r_s["seguro_gs"])} Gs</b></div>', unsafe_allow_html=True)
 
     # ── Flete Table ─────────────────────────────────────────────────────────────
     fle = st.session_state.flete_items
     fle_del = []
-    # Init seguro tracking
     for i, item in enumerate(fle):
         c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 1, 0.4])
         with c1:
             item["descripcion"] = st.text_input(t("descripcion"), item.get("descripcion", ""), key=f"fd_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c2:
-            item["betrag"] = number_input(t("betrag"), item.get("betrag", 0.0), 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
+            # Use key-based binding: number_input returns value, assign back to session_state
+            new_betrag = number_input(t("betrag"), float(item.get("betrag", 0.0)), 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
+            st.session_state.flete_items[i]["betrag"] = new_betrag
         with c3:
             opts = ["masseinheit", "wert", "cantidad"]
             cur = item.get("aufteilung", "masseinheit")
             idx = opts.index(cur) if cur in opts else 0
             item["aufteilung"] = st.selectbox(t("aufteilung"), opts, index=idx, key=f"fa_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c4:
-            item["cantidad"] = number_input(t("cantidad"), item.get("cantidad", 1.0), 1.0, f"fc_{i}", label_visibility="visible" if i == 0 else "collapsed")
+            new_cantidad = number_input(t("cantidad"), float(item.get("cantidad", 1.0)), 1.0, f"fc_{i}", label_visibility="visible" if i == 0 else "collapsed")
+            st.session_state.flete_items[i]["cantidad"] = new_cantidad
         with c5:
             if st.button("✕", key=f"del_fle_{i}", help="Zeile entfernen"):
                 fle_del.append(i)
@@ -391,7 +371,7 @@ if page == "🧮 Kalkulator":
         r = st.session_state.result
         cc1, cc2 = st.columns(2)
         with cc1:
-            st.markdown(f'<div class="value-box cif">{t("cif_usd")}<br><b>{_fmt(r["cif_usd"])}</b></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="value-box cif">{t("cif_currency")}<br><b>{_fmt(r["cif_currency"])} {st.session_state.currency_flete}</b></div>', unsafe_allow_html=True)
         with cc2:
             st.markdown(f'<div class="value-box cif">{t("cif_gs")}<br><b>{_fmt(r["cif_gs"])} Gs</b></div>', unsafe_allow_html=True)
 
@@ -419,7 +399,6 @@ if page == "🧮 Kalkulator":
         with c5:
             if st.button("✕", key=f"del_imp_{i}", help="Diese Zeile entfernen"):
                 imp_del.append(i)
-        imp_total += item["betrag"]
 
     if imp_del:
         for i in sorted(imp_del, reverse=True):
@@ -427,7 +406,11 @@ if page == "🧮 Kalkulator":
                 st.session_state.importacion_items.pop(i)
         st.rerun()
 
-    st.markdown(f"<small>{t('summe')}: <b>{_fmt2(imp_total)}</b></small> (percentage-based values computed from CIF)", unsafe_allow_html=True)
+    # Summe aus den berechneten Resultaten, nicht aus rohen Inputs
+    imp_summe = imp_total
+    if st.session_state.result:
+        imp_summe = st.session_state.result.get("total_importacion", imp_total)
+    st.markdown(f"<small>{t('summe')}: <b>{_fmt2(imp_summe)}</b></small> (percentage-based values computed from CIF)", unsafe_allow_html=True)
 
     if st.button("+ Zeile", key="add_imp"):
         st.session_state.importacion_items.append({"descripcion": "", "betrag": 0.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1.0, "peso_volumen": 0.0})
@@ -457,7 +440,6 @@ if page == "🧮 Kalkulator":
         with c5:
             if st.button("✕", key=f"del_nac_{i}", help="Diese Zeile entfernen"):
                 nac_del.append(i)
-        nac_total += item["betrag"]
 
     if nac_del:
         for i in sorted(nac_del, reverse=True):
@@ -466,39 +448,41 @@ if page == "🧮 Kalkulator":
         st.rerun()
 
     if len(nac) > 1:
-        st.markdown(f"<small>{t('summe')}: <b>{_fmt2(nac_total)}</b></small>", unsafe_allow_html=True)
+        nac_summe = nac_total
+        if st.session_state.result:
+            nac_summe = st.session_state.result.get("total_nacional", nac_total)
+        st.markdown(f"<small>{t('summe')}: <b>{_fmt2(nac_summe)}</b></small>", unsafe_allow_html=True)
 
     if st.button("+ Zeile", key="add_nac"):
         st.session_state.nacional_items.append(dict(NACIONAL_DEFAULTS[0]))
         st.rerun()
 
-    # ── Reset Button ──
-    if st.button(t("reset"), use_container_width=True):
-        for k, v in defaults.items():
-            st.session_state[k] = v
-        st.rerun()
+    # ── Reset Button oben ──
+    c_reset, _ = st.columns([0.15, 0.85])
+    with c_reset:
+        if st.button(t("reset"), key="btn_reset_top"):
+            for k, v in defaults.items():
+                st.session_state[k] = v
+            st.rerun()
 
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # VISUELLE TRENNUNG → UNTERER BEREICH — ERGEBNIS
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
 
     if st.session_state.result:
         r = st.session_state.result
         st.subheader(t("ergebnis"))
 
-        # Proveedor Ergebnis-Tabelle (HTML for Ctrl+C copy) — NO Steuern column
+        # Ergebnis-Tabelle: Beschreibung, Kosten, Steuern, Kosten/Unidad
         summary = r.get("proveedor_summary", [])
         if summary:
             html = f'''<table class="result-table">
-    <tr><th>{t("descripcion")}</th><th>{t("kosten")}</th><th>{t("gesamtbetrag")}</th><th>{t("kosten_pro_unidad")}</th></tr>'''
-            total_k = 0.0; total_g = 0.0
+    <tr><th>{t("descripcion")}</th><th>{t("kosten")}</th><th>{t("steuern")}</th><th>{t("kosten_pro_unidad")}</th></tr>'''
+            total_k = 0.0; total_s = 0.0; total_pu = 0.0
             for s in summary:
-                html += f'<tr><td>{s["descripcion"] or "(leer)"}</td><td>{_fmt(s["kosten"])} Gs</td><td>{_fmt(s["gesamtbetrag"])} Gs</td><td>{_fmt(s["kosten_pro_unidad"])} Gs</td></tr>'
-                total_k += s["kosten"]; total_g += s["gesamtbetrag"]
+                html += f'<tr><td>{s["descripcion"] or "(leer)"}</td><td>{_fmt(s["kosten"])} Gs</td><td>{_fmt(s["steuern"])} Gs</td><td>{_fmt(s["kosten_pro_unidad"])} Gs</td></tr>'
+                total_k += s["kosten"]; total_s += s["steuern"]; total_pu += s["kosten_pro_unidad"]
             if len(summary) > 1:
-                html += f'<tr class="total-row"><td><b>{t("summe")}</b></td><td><b>{_fmt(total_k)} Gs</b></td><td><b>{_fmt(total_g)} Gs</b></td><td></td></tr>'
+                html += f'<tr class="total-row"><td><b>{t("summe")}</b></td><td><b>{_fmt(total_k)} Gs</b></td><td><b>{_fmt(total_s)} Gs</b></td><td><b>{_fmt(total_pu)} Gs</b></td></tr>'
+            # Gran Total Zeile
+            html += f'<tr class="total-row" style="border-top:3px double #003049;"><td><b>{t("gran_total")}</b></td><td colspan="2"><b>{_fmt(r["gran_total"])} Gs</b></td><td><b>{_fmt(r["gran_total_per_unit"])} Gs</b></td></tr>'
             html += '</table>'
             st.markdown(html, unsafe_allow_html=True)
 
@@ -516,7 +500,7 @@ if page == "🧮 Kalkulator":
         for s in summary:
             lines.append(f"{s['descripcion'] or '(leer)'}: Kosten={_fmt(s['kosten'])} Gs | Gesamt={_fmt(s['gesamtbetrag'])} Gs | Pro Einheit={_fmt(s['kosten_pro_unidad'])} Gs")
         lines.append(f"GRAN TOTAL: {_fmt(r['gran_total'])} Gs | PRO EINHEIT: {_fmt(r['gran_total_per_unit'])} Gs")
-        lines.append(f"FOB: {_fmt(r['fob_currency'])} {st.session_state.currency_fob} = {_fmt(r['fob_gs'])} Gs | CIF: {_fmt(r['cif_gs'])} Gs ({_fmt(r['cif_usd'])} USD)")
+        lines.append(f"FOB: {_fmt(r['fob_currency'])} {st.session_state.currency_fob} = {_fmt(r['fob_gs'])} Gs | CIF: {_fmt(r['cif_gs'])} Gs ({_fmt(r['cif_currency'])} {st.session_state.currency_flete})")
         st.text_area("", "\n".join(lines), height=120, key="copy_area", label_visibility="collapsed")
 
         # Detail expander
@@ -543,10 +527,9 @@ if page == "🧮 Kalkulator":
                 "currency_fob": st.session_state.currency_fob,
                 "exchange_rate_fob": st.session_state.exchange_rate_fob,
                 "purchase_unit": st.session_state.purchase_unit,
-                "seguro_percent": st.session_state.seguro_pct,
                 "currency_flete": st.session_state.currency_flete,
                 "exchange_rate_flete": st.session_state.exchange_rate_flete,
-                **{k: r[k] for k in ["fob_currency","fob_gs","seguro_currency","seguro_gs","cif_usd","cif_gs","total_importacion","total_nacional","gran_total","gran_total_per_unit"]},
+                **{k: r[k] for k in ["fob_currency","fob_gs","cif_currency","cif_gs","total_importacion","total_nacional","gran_total","gran_total_per_unit"]},
                 "proveedor": st.session_state.proveedor_items,
                 "flete": st.session_state.flete_items,
                 "importacion": st.session_state.importacion_items,
@@ -586,7 +569,7 @@ elif page == "📋 Mein Verlauf":
                             full = load_calculation(cid)
                             if full:
                                 inp = full.get("inputs", {}) if isinstance(full.get("inputs"), dict) else {}
-                                for k in ["currency_fob","exchange_rate_fob","purchase_unit","currency_flete","exchange_rate_flete","seguro_percent"]:
+                                for k in ["currency_fob","exchange_rate_fob","purchase_unit","currency_flete","exchange_rate_flete"]:
                                     if k in inp:
                                         st.session_state[k] = inp[k]
                                 for key in ["proveedor","flete","importacion","costo_nacional"]:
@@ -638,7 +621,7 @@ elif page == "⚙️ Admin":
                             full = load_calculation(cid)
                             if full:
                                 inp = full.get("inputs", {}) if isinstance(full.get("inputs"), dict) else {}
-                                for k in ["currency_fob","exchange_rate_fob","purchase_unit","currency_flete","exchange_rate_flete","seguro_percent"]:
+                                for k in ["currency_fob","exchange_rate_fob","purchase_unit","currency_flete","exchange_rate_flete"]:
                                     if k in inp:
                                         st.session_state[k] = inp[k]
                                 for key in ["proveedor","flete","importacion","costo_nacional"]:
