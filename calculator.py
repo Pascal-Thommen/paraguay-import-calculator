@@ -18,7 +18,7 @@ IMPORTACION_DEFAULTS = [
     {"descripcion": "INDI",                           "betrag": INDI_RATE * 100,  "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
     {"descripcion": "Percepción de IRE",              "betrag": IRE_PERCEPCION * 100, "aufteilung": "wert",    "impuesto": "Anticipo IRE", "cantidad": 1, "peso_volumen": 0},
     {"descripcion": "Impuesto Selectivo al Consumo",  "betrag": ISC_RATE * 100,   "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
-    {"descripcion": "IVA",                            "betrag": IVA_RATE * 100,   "aufteilung": "wert",        "impuesto": "IVA CF",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "IVA",                            "betrag": IVA_RATE * 100,   "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
     {"descripcion": "Canon Informático Sofía",        "betrag": 50000.0,          "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
     {"descripcion": "Visación consular",              "betrag": 30000.0,          "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
     {"descripcion": "Tasa Portuaria",                 "betrag": 0.0,              "aufteilung": "masseinheit", "impuesto": "10%",          "cantidad": 1, "peso_volumen": 0},
@@ -95,7 +95,7 @@ def calculate(
     # 2. SEGURO
     # ═══════════════════════════════════════════════════════════════════════
     seguro_currency = round(fob_currency * seguro_percent / 100, 2)
-    seguro_gs = round(seguro_currency * exchange_rate_fob, 2)
+    seguro_gs = round(seguro_currency * exchange_rate_flete, 2)
 
     # ═══════════════════════════════════════════════════════════════════════
     # 3. FLETE → CIF
@@ -153,15 +153,15 @@ def calculate(
         if "derecho aduanero" in desc:
             base = cif_gs * (it["betrag"] / 100)
         elif "servicio de valoración" in desc:
-            base = cif_gs * VALORACION_RATE
+            base = cif_gs * (it["betrag"] / 100)
         elif desc.startswith("indi"):
-            base = cif_gs * INDI_RATE
+            base = cif_gs * (it["betrag"] / 100)
         elif "percepción" in desc and "ire" in desc:
-            base = cif_gs * IRE_PERCEPCION
+            base = cif_gs * (it["betrag"] / 100)
         elif "consumo" in desc or desc.startswith("isc"):
-            base = cif_gs * ISC_RATE
+            base = cif_gs * (it["betrag"] / 100)
         elif desc == "iva":
-            base = cif_gs * IVA_RATE
+            base = cif_gs * (it["betrag"] / 100)
         elif it.get("aufteilung") == "masseinheit":
             base = it["betrag"] * total_peso
         elif it.get("aufteilung") == "cantidad":

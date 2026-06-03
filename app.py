@@ -200,7 +200,6 @@ defaults = {
     "show_iva_detail": False,
     "session_user": "",  # filled on startup
     "nav_redirect": False,
-    "nav_redirect": False,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -367,8 +366,8 @@ if page == "🧮 Kalkulator":
         with c2:
             item["betrag"] = number_input(t("betrag"), item.get("betrag", 0.0), 0.01, f"fb_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c3:
-            opts = ["maseinheit", "wert", "cantidad"]
-            cur = item.get("aufteilung", "maseinheit")
+            opts = ["masseinheit", "wert", "cantidad"]
+            cur = item.get("aufteilung", "masseinheit")
             idx = opts.index(cur) if cur in opts else 0
             item["aufteilung"] = st.selectbox(t("aufteilung"), opts, index=idx, key=f"fa_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c4:
@@ -446,8 +445,8 @@ if page == "🧮 Kalkulator":
         with c2:
             item["betrag"] = number_input(t("betrag"), item.get("betrag", 0.0), 0.01, f"nb_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c3:
-            opts = ["maseinheit", "wert", "cantidad"]
-            cur = item.get("aufteilung", "maseinheit")
+            opts = ["masseinheit", "wert", "cantidad"]
+            cur = item.get("aufteilung", "masseinheit")
             idx = opts.index(cur) if cur in opts else 0
             item["aufteilung"] = st.selectbox(t("aufteilung"), opts, index=idx, key=f"na_{i}", label_visibility="visible" if i == 0 else "collapsed")
         with c4:
