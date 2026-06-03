@@ -258,6 +258,16 @@ if "session_history" not in st.session_state:
 if page == "🧮 Kalkulator":
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # RESET BUTTON — ganz oben
+    # ═══════════════════════════════════════════════════════════════════════════
+    c_reset, _ = st.columns([0.15, 0.85])
+    with c_reset:
+        if st.button(t("reset"), key="btn_reset_top"):
+            for k, v in defaults.items():
+                st.session_state[k] = v
+            st.rerun()
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # OBERER BEREICH — EINGABEN
     # ═══════════════════════════════════════════════════════════════════════════
 
@@ -457,15 +467,6 @@ if page == "🧮 Kalkulator":
         st.session_state.nacional_items.append(dict(NACIONAL_DEFAULTS[0]))
         st.rerun()
 
-    # ── Reset Button oben ──
-    c_reset, _ = st.columns([0.15, 0.85])
-    with c_reset:
-        if st.button(t("reset"), key="btn_reset_top"):
-            for k, v in defaults.items():
-                st.session_state[k] = v
-            st.rerun()
-
-
     if st.session_state.result:
         r = st.session_state.result
         st.subheader(t("ergebnis"))
@@ -486,22 +487,7 @@ if page == "🧮 Kalkulator":
             html += '</table>'
             st.markdown(html, unsafe_allow_html=True)
 
-        # Gran Total
-        cg1, cg2 = st.columns(2)
-        with cg1:
-            st.markdown(f'<div class="value-box total">{t("gran_total")}<br><b>{_fmt(r["gran_total"])} Gs</b></div>', unsafe_allow_html=True)
-        with cg2:
-            st.markdown(f'<div class="value-box total">{t("kosten_pro_unidad")}<br><b>{_fmt(r["gran_total_per_unit"])} Gs</b></div>', unsafe_allow_html=True)
-
-        # Copy-friendly text output (Ctrl+C works here)
-        st.markdown("---")
-        st.caption("Ergebnis als Text (markieren + Ctrl+C):")
-        lines = []
-        for s in summary:
-            lines.append(f"{s['descripcion'] or '(leer)'}: Kosten={_fmt(s['kosten'])} Gs | Gesamt={_fmt(s['gesamtbetrag'])} Gs | Pro Einheit={_fmt(s['kosten_pro_unidad'])} Gs")
-        lines.append(f"GRAN TOTAL: {_fmt(r['gran_total'])} Gs | PRO EINHEIT: {_fmt(r['gran_total_per_unit'])} Gs")
-        lines.append(f"FOB: {_fmt(r['fob_currency'])} {st.session_state.currency_fob} = {_fmt(r['fob_gs'])} Gs | CIF: {_fmt(r['cif_gs'])} Gs ({_fmt(r['cif_currency'])} {st.session_state.currency_flete})")
-        st.text_area("", "\n".join(lines), height=120, key="copy_area", label_visibility="collapsed")
+        # Gran Total in Ergebnis-Tabelle bereits enthalten — keine separaten Boxen, keine Textarea
 
         # Detail expander
         st.checkbox(f"📋 {t('betrag_ohne_iva')} Details", key="show_iva_detail")
