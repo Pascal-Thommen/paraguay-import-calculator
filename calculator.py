@@ -154,7 +154,6 @@ def _compute_anteile(products: list[Product], aufteilung: str) -> list[float]:
 
 def calculate(
     products: list[dict],
-    einkauf: list[dict],
     flete: list[dict],
     importacion: list[dict],
     nacional: list[dict],
@@ -163,10 +162,9 @@ def calculate(
     Zentrale Berechnungs-Engine v6.
 
     Returns dict with:
-      - endtabelle: list of dicts (Name, Kosten pro Unidad, Unidades, Kosten Total, Steuern Total, Total)
-      - summenzeile: dict (Σ Kosten Total, Σ Steuern Total, Σ Total)
-      - details: dict with intermediate step data for UI/debugging
-      - kontrollrechnung: dict with verification sums
+      - endtabelle: list of dicts
+      - summenzeile: dict
+      - kontrollrechnung: dict mit fob, cif, summe_menge, summe_maseinheit
     """
     # ── Normalisiere Produkte ──────────────────────────────────────────────
     prods = [Product(
@@ -188,10 +186,10 @@ def calculate(
     fob = sum(p.einkaufspreis for p in prods)
     summe_menge = sum(p.menge for p in prods)
     summe_maseinheit = sum(p.maseinheit for p in prods)
+    cif = fob  # CIF = FOB + Kosten aus Flete + Importación (ohne Steuern)
 
     # ── Schritt 1+2+3: Alle Zeilen aller Tabellen durchlaufen ──────────────
     all_tables = [
-        ("Einkauf", einkauf),
         ("Flete", flete),
         ("Importación", importacion),
         ("Nacional", nacional),
@@ -283,6 +281,11 @@ def calculate(
         "Total": round(sum_total, 2),
     }
 
+    # CIF = FOB + Kosten aus Flete + Importación (ohne Steuern)
+    flete_kosten = sum(d["kosten_zeile"] for d in step_details if d["tabelle"] == "Flete")
+    importacion_kosten = sum(d["kosten_zeile"] for d in step_details if d["tabelle"] == "Importación")
+    cif = fob + flete_kosten + importacion_kosten
+
     # ── Kontrollrechnung ───────────────────────────────────────────────────
     # Σ anteil pro Zeile muss 1 sein
     kontroll_anteil_ok = True
@@ -305,6 +308,7 @@ def calculate(
         "summe_anteil_gleich_1": kontroll_anteil_ok,
         "kosten_plus_steuern_gleich_betrag": kontroll_betrag_ok,
         "fob": round(fob, 2),
+        "cif": round(cif, 2),
         "summe_menge": round(summe_menge, 2),
         "summe_maseinheit": round(summe_maseinheit, 2),
     }

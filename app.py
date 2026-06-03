@@ -5,7 +5,6 @@ Produkte-Tabelle + 4 Kostentabellen → Endtabelle mit Summenzeile.
 import streamlit as st
 from calculator import (
     calculate,
-    EINKAUF_DEFAULTS,
     FLETE_DEFAULTS,
     IMPORTACION_DEFAULTS,
     NACIONAL_DEFAULTS,
@@ -129,7 +128,6 @@ t = lambda k: TR.get(lang_code, TR["de"]).get(k, k)
 # ── Defaults ───────────────────────────────────────────────────────────────
 defaults = {
     "products": [{"name": "", "einkaufspreis": 0.0, "menge": 1.0, "maseinheit": 1.0}],
-    "einkauf_items": [dict(EINKAUF_DEFAULTS[0])],
     "flete_items": [dict(d) for d in FLETE_DEFAULTS],
     "importacion_items": [dict(d) for d in IMPORTACION_DEFAULTS],
     "nacional_items": [dict(d) for d in NACIONAL_DEFAULTS],
@@ -165,7 +163,6 @@ def recalc():
     try:
         result = calculate(
             products=st.session_state.products,
-            einkauf=st.session_state.einkauf_items,
             flete=st.session_state.flete_items,
             importacion=st.session_state.importacion_items,
             nacional=st.session_state.nacional_items,
@@ -229,15 +226,21 @@ if st.button(t("add_row"), key="add_prod"):
     st.session_state.products.append({"name": "", "einkaufspreis": 0.0, "menge": 1.0, "maseinheit": 0.0})
     st.rerun()
 
-# ── FOB Display ─────────────────────────────────────────────────────────────
+# ── FOB / CIF Header ────────────────────────────────────────────────────────
 if st.session_state.result:
     kr = st.session_state.result.get("kontrollrechnung", {})
-    st.markdown(f"**FOB:** {_fmt2(kr.get('fob', 0))}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("FOB", f"{_fmt2(kr.get('fob', 0))} Gs")
+    with c2:
+        st.metric("CIF", f"{_fmt2(kr.get('cif', 0))} Gs")
+    with c3:
+        st.metric("Σ Menge", f"{kr.get('summe_menge', 0)}")
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════
-# KOSTENTABELLEN (4x)
+# KOSTENTABELLEN (3x: Flete, Importación, Nacional)
 # ═══════════════════════════════════════════════════════════════════════════
 AUFTEILUNG_OPTIONS = ["Wert", "Maßeinheit", "Menge"]
 IMPUESTO_OPTIONS = ["Impuesto", "Anticipo IRE", "IVA CF", "10%", "5%"]
@@ -291,7 +294,6 @@ def render_cost_table(title_key, session_key, defaults_list):
         st.rerun()
 
 
-render_cost_table("einkauf", "einkauf_items", EINKAUF_DEFAULTS)
 render_cost_table("flete", "flete_items", FLETE_DEFAULTS)
 render_cost_table("importacion", "importacion_items", IMPORTACION_DEFAULTS)
 render_cost_table("nacional", "nacional_items", NACIONAL_DEFAULTS)
