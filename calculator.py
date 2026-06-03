@@ -1,7 +1,9 @@
 """
-Paraguay Import Cost Calculator — Core Engine v4.
+Paraguay Import Cost Calculator — Core Engine v5.
 PYG-zentrierte Währungslogik. Alle Werte werden über PYG umgerechnet.
 CIF in PYG ist die Steuerbemessungsgrundlage.
+Kein separates Seguro-Feld — Seguro ist eine normale Flete-Zeile.
+Kein exchange_rate_usd — nur FOB- und Flete-Wechselkurs.
 """
 from dataclasses import dataclass, field
 
@@ -29,6 +31,7 @@ IMPORTACION_DEFAULTS = [
 
 FLETE_DEFAULTS = [
     {"descripcion": "Flete internacional", "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Seguro",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
 ]
 
 NACIONAL_DEFAULTS = [
@@ -56,27 +59,26 @@ def calculate(
     costo_nacional: list[dict],
     exchange_rate_fob: float,       # FOB-Währung → PYG
     exchange_rate_flete: float,     # Flete-Währung → PYG
-    exchange_rate_usd: float,       # USD → PYG (für CIF-USD-Anzeige)
-    seguro_percent: float,
 ) -> dict:
     """
     Zentrale Berechnungs-Engine. Alles läuft in PYG.
-    CIF ist in PYG. CIF USD wird über exchange_rate_usd berechnet.
+    CIF = FOB + Flete (Seguro als normale Flete-Zeile).
+    CIF in PYG ist die Steuerbemessungsgrundlage.
     """
     # ═══════════════════════════════════════════════════════════════════════
     # 1. PROVEEDOR → FOB
     # ═══════════════════════════════════════════════════════════════════════
     fob_currency = 0.0
+    fob_gs = 0.0
     total_cantidad = 0.0
     total_peso = 0.0
     prov_out = []
 
     for it in proveedor:
         iva_f = _iva_factor(it.get("impuesto", "Exento"))
-        # Betrag in FOB-Währung → PYG (Brutto inkl. IVA falls vorhanden)
-        bruto_pyg = it["betrag"] * exchange_rate_fob
-        sin_iva = bruto_pyg / (1 + iva_f) if iva_f > 0 else bruto_pyg
-        iva_gs = bruto_pyg - sin_iva if iva_f > 0 else 0.0
+        betrag_pyg = it["betrag"] * exchange_rate_fob
+        sin_iva = betrag_pyg / (1 + iva_f) if iva_f > 0 else betrag_pyg
+        iva_gs = betrag_pyg - sin_iva if iva_f > 0 else 0.0
 
         fob_currency += it["betrag"]
         total_cantidad += it.get("cantidad", 1.0)
@@ -84,21 +86,15 @@ def calculate(
 
         prov_out.append({**it,
             "betrag_sin_iva": round(sin_iva, 2),
-            "costo_gs": round(bruto_pyg, 2),
+            "costo_gs": round(betrag_pyg, 2),
             "iva_gs": round(iva_gs, 2),
         })
 
-    # FOB in PYG (Brutto)
+    # FOB in PYG = sum(Betrag) × Wechselkurs
     fob_gs = round(fob_currency * exchange_rate_fob, 2)
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 2. SEGURO
-    # ═══════════════════════════════════════════════════════════════════════
-    seguro_currency = round(fob_currency * seguro_percent / 100, 2)
-    seguro_gs = round(seguro_currency * exchange_rate_flete, 2)
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # 3. FLETE → CIF
+    # 2. FLETE → CIF (Seguro als normale Zeile)
     # ═══════════════════════════════════════════════════════════════════════
     flete_out = []
     flete_total_gs = 0.0
@@ -106,14 +102,7 @@ def calculate(
     for it in flete:
         iva_f = _iva_factor(it.get("impuesto", "Exento"))
 
-        if it["descripcion"].lower().startswith("seguro"):
-            # Insurance is computed separately from seguro_percent (see §2 above).
-            # Skip seguro rows here — do NOT add to flete_total_gs.
-            # This prevents overwriting any user-entered value AND prevents
-            # double-counting insurance in CIF (cif_gs already adds seguro_gs).
-            betrag_pyg = 0.0
-            display_betrag = 0.0
-        elif it.get("aufteilung") == "masseinheit":
+        if it.get("aufteilung") == "masseinheit":
             betrag_pyg = it["betrag"] * exchange_rate_flete * total_peso
             display_betrag = it["betrag"] * total_peso
         elif it.get("aufteilung") == "cantidad":
@@ -134,13 +123,13 @@ def calculate(
             "iva_gs": round(iva_gs, 2),
         })
 
-    # CIF in PYG (Steuerbemessungsgrundlage)
-    cif_gs = round(fob_gs + seguro_gs + flete_total_gs, 2)
-    # CIF in USD (Referenz)
-    cif_usd = round(cif_gs / exchange_rate_usd, 2) if exchange_rate_usd else 0.0
+    # CIF = FOB + Flete (in Gs)
+    cif_gs = round(fob_gs + flete_total_gs, 2)
+    # CIF in Flete-Währung (Referenz)
+    cif_currency = round(cif_gs / exchange_rate_flete, 2) if exchange_rate_flete else 0.0
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 4. IMPORTACIÓN — Zollabgaben
+    # 3. IMPORTACIÓN — Zollabgaben
     # ═══════════════════════════════════════════════════════════════════════
     imp_out = []
     total_importacion = 0.0
@@ -149,18 +138,8 @@ def calculate(
         iva_f = _iva_factor(it.get("impuesto", "Exento"))
         desc = it["descripcion"].lower()
 
-        # Berechnungsbasis
-        if "derecho aduanero" in desc:
-            base = cif_gs * (it["betrag"] / 100)
-        elif "servicio de valoración" in desc:
-            base = cif_gs * (it["betrag"] / 100)
-        elif desc.startswith("indi"):
-            base = cif_gs * (it["betrag"] / 100)
-        elif "percepción" in desc and "ire" in desc:
-            base = cif_gs * (it["betrag"] / 100)
-        elif "consumo" in desc or desc.startswith("isc"):
-            base = cif_gs * (it["betrag"] / 100)
-        elif desc == "iva":
+        # Zollabgaben als % vom CIF (wenn "aufteilung" = "wert")
+        if it.get("aufteilung") == "wert":
             base = cif_gs * (it["betrag"] / 100)
         elif it.get("aufteilung") == "masseinheit":
             base = it["betrag"] * total_peso
@@ -180,7 +159,7 @@ def calculate(
         })
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 5. COSTO NACIONAL
+    # 4. COSTO NACIONAL
     # ═══════════════════════════════════════════════════════════════════════
     nac_out = []
     total_nacional = 0.0
@@ -206,19 +185,19 @@ def calculate(
         })
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 6. GRAN TOTAL
+    # 5. GRAN TOTAL
     # ═══════════════════════════════════════════════════════════════════════
     gran_total = round(cif_gs + total_importacion + total_nacional, 2)
     gran_total_per_unit = round(gran_total / total_cantidad, 2) if total_cantidad > 0 else 0.0
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 7. PROVEEDOR SUMMARY (IAS 2 Netto-Preis)
+    # 6. PROVEEDOR SUMMARY (IAS 2 Netto-Preis)
     # ═══════════════════════════════════════════════════════════════════════
     summary = []
     for it in prov_out:
-        net = it["betrag_sin_iva"]     # Preis ohne IVA
-        tax = it["iva_gs"]             # IVA-Anteil
-        total = it["costo_gs"]         # Bruttopreis
+        net = it["betrag_sin_iva"]
+        tax = it["iva_gs"]
+        total = it["costo_gs"]
         per_unit = round(net / it.get("cantidad", 1.0), 2) if it.get("cantidad", 1.0) > 0 else 0.0
         summary.append({
             "descripcion": it["descripcion"],
@@ -231,10 +210,8 @@ def calculate(
     return {
         "fob_currency": fob_currency,
         "fob_gs": fob_gs,
-        "seguro_currency": seguro_currency,
-        "seguro_gs": seguro_gs,
         "flete_total_gs": flete_total_gs,
-        "cif_usd": cif_usd,
+        "cif_currency": cif_currency,
         "cif_gs": cif_gs,
         "total_importacion": total_importacion,
         "total_nacional": total_nacional,
