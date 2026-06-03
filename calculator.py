@@ -179,7 +179,7 @@ def calculate(
     if not prods:
         return {
             "endtabelle": [],
-            "summenzeile": {"kosten_total": 0.0, "steuern_total": 0.0, "total": 0.0},
+            "summenzeile": {"Name": "Σ SUMME", "Kosten pro Unidad": None, "Unidades": None, "Kosten Total": 0.0, "Steuern Total": 0.0, "Total": 0.0},
             "details": {},
             "kontrollrechnung": {},
         }
