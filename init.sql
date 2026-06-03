@@ -1,0 +1,8 @@
+CREATE DATABASE paraguay_calc;
+\c paraguay_calc;
+
+CREATE USER paraguay WITH PASSWORD 'paraguay';
+GRANT ALL PRIVILEGES ON DATABASE paraguay_calc TO paraguay;
+GRANT ALL ON SCHEMA public TO paraguay;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO paraguay;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO paraguay;
