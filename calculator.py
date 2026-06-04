@@ -1,324 +1,270 @@
 """
-Paraguay Import Cost Calculator — Core Engine v6.
-Pro-Produkt-Aufteilung nach Berechnungsspezifikation.md.
-
-Input:
-- products: list[dict] mit name, einkaufspreis, menge, maseinheit
-- 4 Kostentabellen: einkauf, flete, importacion, nacional
-  Jede Zeile: beschreibung, betrag, impuesto, aufteilung
-
-Output:
-- Endtabelle pro Produkt (Name, Kosten pro Unidad, Unidades, Kosten Total, Steuern Total, Total)
-- Summenzeile
-- Kontrollrechnungen (Σ anteil = 1, kosten + steuern = betrag)
+Paraguay Import Cost Calculator - Core Engine v5.
+PYG-zentrierte Währungslogik. Alle Werte werden über PYG umgerechnet.
+CIF in PYG ist die Steuerbemessungsgrundlage. Kein Seguro, kein USD-Referenzkurs.
 """
 from dataclasses import dataclass, field
-from typing import Literal
 
-ImpuestoTyp = Literal["Impuesto", "Anticipo IRE", "IVA CF", "10%", "5%"]
-AufteilungTyp = Literal["Wert", "Maßeinheit", "Menge"]
+DAI_DEFAULT      = 0.14
+INDI_RATE        = 0.005
+ISC_RATE         = 0.01
+IRE_PERCEPCION   = 0.004
+IVA_RATE         = 0.10
+VALORACION_RATE  = 0.0015
 
-
-@dataclass
-class Product:
-    name: str
-    einkaufspreis: float
-    menge: float
-    maseinheit: float
-
-
-@dataclass
-class CostRow:
-    beschreibung: str
-    betrag: float
-    impuesto: str
-    aufteilung: str
-
-
-@dataclass
-class ProductShare:
-    """Anteil eines Produkts an einer Zeile."""
-    product: Product
-    anteil: float
-
-
-@dataclass
-class RowResult:
-    """Ergebnis einer einzelnen Zeile (Schritt 1)."""
-    row: CostRow
-    kosten: float
-    steuern: float
-
-
-@dataclass
-class ProductRowResult:
-    """Ergebnis einer Zeile für ein bestimmtes Produkt (Schritt 3)."""
-    product: Product
-    row: CostRow
-    kosten: float
-    steuern: float
-
-
-@dataclass
-class ProductSummary:
-    """Aggregation pro Produkt (Schritt 4)."""
-    product: Product
-    kosten_total: float
-    steuern_total: float
-    total: float
-    kosten_pro_unidad: float
-
-
-# ── Default-Templates für die 4 Tabellen ──────────────────────────────────
-
-EINKAUF_DEFAULTS: list[dict] = [
-    {"beschreibung": "", "betrag": 0.0, "impuesto": "Impuesto", "aufteilung": "Wert"},
+IMPORTACION_DEFAULTS = [
+    {"descripcion": "Derecho Aduanero",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Servicio de Valoración Aduanera","betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "INDI",                           "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Percepción de IRE",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Anticipo IRE", "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Impuesto Selectivo al Consumo",  "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "IVA",                            "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Canon Informático Sofía",        "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Visación consular",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento",       "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Tasa Portuaria",                 "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "10%",          "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Fotocopias",                     "betrag": 0.0, "aufteilung": "wert",        "impuesto": "10%",          "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Gastos de Estiba/Desestiba",     "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "10%",          "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Honorarios del Despachante",     "betrag": 0.0, "aufteilung": "wert",        "impuesto": "10%",          "cantidad": 1, "peso_volumen": 0},
 ]
 
-FLETE_DEFAULTS: list[dict] = [
-    {"beschreibung": "Flete internacional", "betrag": 0.0, "impuesto": "Impuesto", "aufteilung": "Maßeinheit"},
-    {"beschreibung": "Seguro",              "betrag": 0.0, "impuesto": "Impuesto", "aufteilung": "Wert"},
+FLETE_DEFAULTS = [
+    {"descripcion": "Flete internacional", "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
+    {"descripcion": "Seguro",              "betrag": 0.0, "aufteilung": "wert",        "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0},
 ]
 
-IMPORTACION_DEFAULTS: list[dict] = [
-    {"beschreibung": "Derecho Aduanero",              "betrag": 0.14,  "impuesto": "Impuesto",     "aufteilung": "Wert"},
-    {"beschreibung": "Servicio de Valoración Aduanera","betrag": 0.0015,"impuesto": "Impuesto",     "aufteilung": "Wert"},
-    {"beschreibung": "INDI",                           "betrag": 0.005, "impuesto": "Impuesto",     "aufteilung": "Wert"},
-    {"beschreibung": "Percepción de IRE",              "betrag": 0.004, "impuesto": "Anticipo IRE", "aufteilung": "Wert"},
-    {"beschreibung": "Impuesto Selectivo al Consumo",  "betrag": 0.01,  "impuesto": "Impuesto",     "aufteilung": "Wert"},
-    {"beschreibung": "IVA",                            "betrag": 0.10,  "impuesto": "IVA CF",       "aufteilung": "Wert"},
-    {"beschreibung": "Canon Informático Sofía",        "betrag": 50000.0,"impuesto": "Impuesto",    "aufteilung": "Wert"},
-    {"beschreibung": "Visación consular",              "betrag": 30000.0,"impuesto": "Impuesto",    "aufteilung": "Wert"},
-    {"beschreibung": "Tasa Portuaria",                 "betrag": 0.0,   "impuesto": "10%",          "aufteilung": "Maßeinheit"},
-    {"beschreibung": "Fotocopias",                     "betrag": 5000.0, "impuesto": "10%",          "aufteilung": "Wert"},
-    {"beschreibung": "Gastos de Estiba/Desestiba",     "betrag": 25000.0,"impuesto": "10%",          "aufteilung": "Maßeinheit"},
-    {"beschreibung": "Honorarios del Despachante",     "betrag": 150000.0,"impuesto": "10%",         "aufteilung": "Wert"},
+NACIONAL_DEFAULTS = [
+    {"descripcion": "Flete aduana deposito", "betrag": 0.0, "aufteilung": "masseinheit", "impuesto": "10%", "cantidad": 1, "peso_volumen": 0},
 ]
 
-NACIONAL_DEFAULTS: list[dict] = [
-    {"beschreibung": "Flete aduana deposito", "betrag": 0.0, "impuesto": "10%", "aufteilung": "Maßeinheit"},
+PROVEEDOR_DEFAULTS = [
+    {"descripcion": "", "betrag": 0.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1.0, "peso_volumen": 0.0},
 ]
 
 
-# ── Hilfsfunktionen ────────────────────────────────────────────────────────
+def _iva_factor(impuesto: str) -> float:
+    """Return IVA factor: 0.10 for IVA CF/10%, 0.0 otherwise."""
+    imp = impuesto.strip().upper()
+    if imp in ("IVA CF", "IVA", "5%", "10%"):
+        iva_map = {"IVA CF": IVA_RATE, "IVA": IVA_RATE, "10%": IVA_RATE, "5%": 0.05}
+        return iva_map.get(imp, 0.0)
+    return 0.0
 
-def _split_kosten_steuern(betrag: float, impuesto: str) -> tuple[float, float]:
-    """
-    Schritt 1: Kosten & Steuern pro Zeile berechnen.
-    """
-    imp = impuesto.strip()
-    if imp == "Impuesto":
-        return betrag, 0.0
-    if imp == "Anticipo IRE":
-        return 0.0, betrag
-    if imp == "IVA CF":
-        return betrag, 0.0
-    if imp == "10%":
-        kosten = betrag / 1.10
-        steuern = betrag / 11.0
-        return kosten, steuern
-    if imp == "5%":
-        kosten = betrag / 1.05
-        steuern = betrag / 21.0
-        return kosten, steuern
-    # Fallback: alles als Kosten
-    return betrag, 0.0
-
-
-def _compute_anteile(products: list[Product], aufteilung: str) -> list[float]:
-    """
-    Schritt 2: Anteil pro Produkt berechnen.
-    Returns list of anteile (same order as products).
-    """
-    auf = aufteilung.strip()
-    if auf == "Wert":
-        total = sum(p.einkaufspreis for p in products)
-        if total == 0:
-            return [1.0 / len(products) for _ in products]
-        return [p.einkaufspreis / total for p in products]
-    if auf == "Maßeinheit":
-        total = sum(p.maseinheit for p in products)
-        if total == 0:
-            return [1.0 / len(products) for _ in products]
-        return [p.maseinheit / total for p in products]
-    if auf == "Menge":
-        total = sum(p.menge for p in products)
-        if total == 0:
-            return [1.0 / len(products) for _ in products]
-        return [p.menge / total for p in products]
-    # Fallback
-    return [1.0 / len(products) for _ in products]
-
-
-# ── Hauptberechnung ──────────────────────────────────────────────────────────
 
 def calculate(
-    products: list[dict],
+    proveedor: list[dict],
     flete: list[dict],
     importacion: list[dict],
-    nacional: list[dict],
+    costo_nacional: list[dict],
+    exchange_rate_fob: float,       # FOB-Währung -> PYG
+    exchange_rate_flete: float,     # Flete-Währung -> PYG
 ) -> dict:
     """
-    Zentrale Berechnungs-Engine v6.
-
-    Returns dict with:
-      - endtabelle: list of dicts
-      - summenzeile: dict
-      - kontrollrechnung: dict mit fob, cif, summe_menge, summe_maseinheit
+    Zentrale Berechnungs-Engine v5. Alles läuft in PYG.
+    CIF = FOB + Flete (kein Seguro). CIF in PYG ist die Steuerbemessungsgrundlage.
+    Kein USD-Referenzkurs mehr.
     """
-    # ── Normalisiere Produkte ──────────────────────────────────────────────
-    prods = [Product(
-        name=p.get("name", ""),
-        einkaufspreis=float(p.get("einkaufspreis", 0.0)),
-        menge=float(p.get("menge", 0.0)),
-        maseinheit=float(p.get("maseinheit", 0.0)),
-    ) for p in products]
+    # ═══════════════════════════════════════════════════════════════════════
+    # 1. PROVEEDOR -> FOB
+    # ═══════════════════════════════════════════════════════════════════════
+    fob_currency = 0.0
+    total_cantidad = 0.0
+    total_peso = 0.0
+    prov_out = []
 
-    if not prods:
-        return {
-            "endtabelle": [],
-            "summenzeile": {"Name": "Σ SUMME", "Kosten pro Unidad": None, "Unidades": None, "Kosten Total": 0.0, "Steuern Total": 0.0, "Total": 0.0},
-            "details": {},
-            "kontrollrechnung": {},
-        }
+    for it in proveedor:
+        iva_f = _iva_factor(it.get("impuesto", "Exento"))
+        cantidad = it.get("cantidad", 1.0)
+        # Betrag × Menge in FOB-Währung -> PYG (Brutto inkl. IVA falls vorhanden)
+        bruto_pyg = it["betrag"] * cantidad * exchange_rate_fob
+        sin_iva = bruto_pyg / (1 + iva_f) if iva_f > 0 else bruto_pyg
+        iva_gs = bruto_pyg - sin_iva if iva_f > 0 else 0.0
 
-    # ── Globale Werte ──────────────────────────────────────────────────────
-    fob = sum(p.einkaufspreis for p in prods)
-    summe_menge = sum(p.menge for p in prods)
-    summe_maseinheit = sum(p.maseinheit for p in prods)
-    cif = fob  # CIF = FOB + Kosten aus Flete + Importación (ohne Steuern)
+        fob_currency += it["betrag"] * cantidad
+        total_cantidad += it.get("cantidad", 1.0)
+        total_peso += it.get("peso_volumen", 0.0)
 
-    # ── Schritt 1+2+3: Alle Zeilen aller Tabellen durchlaufen ──────────────
-    all_tables = [
-        ("Flete", flete),
-        ("Importación", importacion),
-        ("Nacional", nacional),
-    ]
-
-    # Pro Produkt: Aggregation
-    prod_kosten = {p.name: 0.0 for p in prods}
-    prod_steuern = {p.name: 0.0 for p in prods}
-
-    step_details: list[dict] = []
-
-    for table_name, rows in all_tables:
-        for row_dict in rows:
-            row = CostRow(
-                beschreibung=row_dict.get("beschreibung", ""),
-                betrag=float(row_dict.get("betrag", 0.0)),
-                impuesto=row_dict.get("impuesto", "Impuesto"),
-                aufteilung=row_dict.get("aufteilung", "Wert"),
-            )
-
-            # Schritt 1
-            kosten_zeile, steuern_zeile = _split_kosten_steuern(row.betrag, row.impuesto)
-
-            # Schritt 2
-            anteile = _compute_anteile(prods, row.aufteilung)
-
-            # Schritt 3
-            row_detail = {
-                "tabelle": table_name,
-                "beschreibung": row.beschreibung,
-                "betrag": row.betrag,
-                "impuesto": row.impuesto,
-                "aufteilung": row.aufteilung,
-                "kosten_zeile": kosten_zeile,
-                "steuern_zeile": steuern_zeile,
-                "anteile": [],
-                "produkt_ergebnisse": [],
-            }
-
-            for idx, p in enumerate(prods):
-                anteil = anteile[idx]
-                k_p = kosten_zeile * anteil
-                s_p = steuern_zeile * anteil
-                prod_kosten[p.name] += k_p
-                prod_steuern[p.name] += s_p
-                row_detail["anteile"].append({
-                    "produkt": p.name,
-                    "anteil": anteil,
-                })
-                row_detail["produkt_ergebnisse"].append({
-                    "produkt": p.name,
-                    "kosten": k_p,
-                    "steuern": s_p,
-                })
-
-            step_details.append(row_detail)
-
-    # ── Schritt 4+5: Endtabelle aufbauen ───────────────────────────────────
-    endtabelle: list[dict] = []
-    sum_kosten = 0.0
-    sum_steuern = 0.0
-    sum_total = 0.0
-
-    for p in prods:
-        k_total = prod_kosten[p.name]
-        s_total = prod_steuern[p.name]
-        t_total = k_total + s_total
-        k_pro_unidad = k_total / p.menge if p.menge > 0 else 0.0
-
-        endtabelle.append({
-            "Name": p.name,
-            "Kosten pro Unidad": round(k_pro_unidad, 2),
-            "Unidades": p.menge,
-            "Kosten Total": round(k_total, 2),
-            "Steuern Total": round(s_total, 2),
-            "Total": round(t_total, 2),
+        prov_out.append({**it,
+            "betrag_sin_iva": round(sin_iva, 2),
+            "costo_gs": round(bruto_pyg, 2),
+            "iva_gs": round(iva_gs, 2),
         })
 
-        sum_kosten += k_total
-        sum_steuern += s_total
-        sum_total += t_total
+    # FOB in PYG (Brutto)
+    fob_gs = round(fob_currency * exchange_rate_fob, 2)
 
-    summenzeile = {
-        "Name": "Σ SUMME",
-        "Kosten pro Unidad": None,
-        "Unidades": None,
-        "Kosten Total": round(sum_kosten, 2),
-        "Steuern Total": round(sum_steuern, 2),
-        "Total": round(sum_total, 2),
-    }
+    # ═══════════════════════════════════════════════════════════════════════
+    # 2. FLETE -> CIF
+    # ═══════════════════════════════════════════════════════════════════════
+    flete_out = []
+    flete_total_gs = 0.0
 
-    # CIF = FOB + Kosten aus Flete + Importación (ohne Steuern)
-    flete_kosten = sum(d["kosten_zeile"] for d in step_details if d["tabelle"] == "Flete")
-    importacion_kosten = sum(d["kosten_zeile"] for d in step_details if d["tabelle"] == "Importación")
-    cif = fob + flete_kosten + importacion_kosten
+    for it in flete:
+        iva_f = _iva_factor(it.get("impuesto", "Exento"))
 
-    # ── Kontrollrechnung ───────────────────────────────────────────────────
-    # Σ anteil pro Zeile muss 1 sein
-    kontroll_anteil_ok = True
-    for d in step_details:
-        total_anteil = sum(a["anteil"] for a in d["anteile"])
-        if abs(total_anteil - 1.0) > 1e-9:
-            kontroll_anteil_ok = False
+        if it.get("aufteilung") == "monto":
+            betrag_pyg = it["betrag"]          # already PYG
+            display_betrag = it["betrag"]
+        elif it.get("aufteilung") == "masseinheit":
+            betrag_pyg = it["betrag"] * exchange_rate_flete * total_peso
+            display_betrag = it["betrag"] * total_peso
+        elif it.get("aufteilung") == "cantidad":
+            betrag_pyg = it["betrag"] * exchange_rate_flete * total_cantidad
+            display_betrag = it["betrag"] * total_cantidad
+        else:
+            betrag_pyg = it["betrag"] * exchange_rate_flete
+            display_betrag = it["betrag"]
 
-    # kosten + steuern = betrag für 10% und 5%
-    kontroll_betrag_ok = True
-    for d in step_details:
-        imp = d["impuesto"]
-        if imp in ("10%", "5%"):
-            zeilen_kosten = d["kosten_zeile"]
-            zeilen_steuern = d["steuern_zeile"]
-            if abs((zeilen_kosten + zeilen_steuern) - d["betrag"]) > 1e-6:
-                kontroll_betrag_ok = False
+        sin_iva = betrag_pyg / (1 + iva_f) if iva_f > 0 else betrag_pyg
+        iva_gs = betrag_pyg - sin_iva if iva_f > 0 else 0.0
+        flete_total_gs += betrag_pyg
 
-    kontrollrechnung = {
-        "summe_anteil_gleich_1": kontroll_anteil_ok,
-        "kosten_plus_steuern_gleich_betrag": kontroll_betrag_ok,
-        "fob": round(fob, 2),
-        "cif": round(cif, 2),
-        "summe_menge": round(summe_menge, 2),
-        "summe_maseinheit": round(summe_maseinheit, 2),
-    }
+        flete_out.append({**it,
+            "betrag": display_betrag,
+            "betrag_sin_iva": round(sin_iva, 2),
+            "costo_gs": round(betrag_pyg, 2),
+            "iva_gs": round(iva_gs, 2),
+        })
+
+    # CIF in PYG (Steuerbemessungsgrundlage)
+    cif_gs = round(fob_gs + flete_total_gs, 2)
+    # CIF in Flete-Währung
+    cif_currency = round(cif_gs / exchange_rate_flete, 2) if exchange_rate_flete else 0.0
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 3. IMPORTACION - Zollabgaben
+    # ═══════════════════════════════════════════════════════════════════════
+    imp_out = []
+    total_importacion = 0.0
+
+    for it in importacion:
+        iva_f = _iva_factor(it.get("impuesto", "Exento"))
+        desc = it["descripcion"].lower()
+
+        # Berechnungsbasis
+        if it.get("aufteilung") == "monto":
+            base = it["betrag"]          # absolute PYG, no CIF percentage
+        elif "derecho aduanero" in desc:
+            base = cif_gs * (it["betrag"] / 100)
+        elif desc == "dai":
+            base = cif_gs * (it["betrag"] / 100)
+        elif "servicio de valoracion" in desc:
+            base = cif_gs * (it["betrag"] / 100)
+        elif desc.startswith("indi"):
+            base = cif_gs * (it["betrag"] / 100)
+        elif "percepcion" in desc and "ire" in desc:
+            base = cif_gs * (it["betrag"] / 100)
+        elif "consumo" in desc or desc.startswith("isc"):
+            base = cif_gs * (it["betrag"] / 100)
+        elif desc == "iva":
+            base = cif_gs * (it["betrag"] / 100)
+        elif it.get("aufteilung") == "masseinheit":
+            base = it["betrag"] * total_peso
+        elif it.get("aufteilung") == "cantidad":
+            base = it["betrag"] * total_cantidad
+        else:
+            base = it["betrag"]
+
+        sin_iva = base / (1 + iva_f) if iva_f > 0 else base
+        iva_gs = base - sin_iva if iva_f > 0 else 0.0
+        total_importacion += base
+
+        imp_out.append({**it,
+            "betrag_sin_iva": round(sin_iva, 2),
+            "costo_gs": round(base, 2),
+            "iva_gs": round(iva_gs, 2),
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 4. COSTO NACIONAL
+    # ═══════════════════════════════════════════════════════════════════════
+    nac_out = []
+    total_nacional = 0.0
+
+    for it in costo_nacional:
+        iva_f = _iva_factor(it.get("impuesto", "10%"))
+
+        if it.get("aufteilung") == "masseinheit":
+            base = it["betrag"] * total_peso
+        elif it.get("aufteilung") == "cantidad":
+            base = it["betrag"] * total_cantidad
+        else:
+            base = it["betrag"]
+
+        sin_iva = base / (1 + iva_f) if iva_f > 0 else base
+        iva_gs = base - sin_iva if iva_f > 0 else 0.0
+        total_nacional += base
+
+        nac_out.append({**it,
+            "betrag_sin_iva": round(sin_iva, 2),
+            "costo_gs": round(base, 2),
+            "iva_gs": round(iva_gs, 2),
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 5. GRAN TOTAL
+    # ═══════════════════════════════════════════════════════════════════════
+    total_non_fob_costs = round(flete_total_gs + total_importacion + total_nacional, 2)
+    gran_total = round(cif_gs + total_importacion + total_nacional, 2)
+    gran_total_per_unit = round(gran_total / total_cantidad, 2) if total_cantidad > 0 else 0.0
+
+    # Sum all non-FOB taxes for proportional distribution
+    non_fob_taxes = 0.0
+    for line in flete_out:
+        non_fob_taxes += line["iva_gs"]
+    for line in imp_out:
+        non_fob_taxes += line["iva_gs"]
+    for line in nac_out:
+        non_fob_taxes += line["iva_gs"]
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 6. PROVEEDOR SUMMARY (pro-Produkt Endtabelle)
+    # ═══════════════════════════════════════════════════════════════════════
+    summary = []
+    for it in prov_out:
+        net = it["betrag_sin_iva"]     # Preis ohne IVA
+        tax = it["iva_gs"]             # IVA-Anteil
+        total = it["costo_gs"]         # Bruttopreis (FOB in PYG)
+        per_unit = round(net / it.get("cantidad", 1.0), 2) if it.get("cantidad", 1.0) > 0 else 0.0
+        prod_cantidad = it.get("cantidad", 1.0)
+
+        # FOB-Anteil: product share of total FOB value
+        fob_share = (total / fob_gs) if fob_gs > 0 else 0.0
+
+        # Proportional distribution of non-FOB costs and taxes
+        kosten_anteilig = round(total + fob_share * total_non_fob_costs, 2)
+        steuern_anteilig = round(tax + fob_share * non_fob_taxes, 2)
+        kosten_pro_einheit = round(kosten_anteilig / prod_cantidad, 2) if prod_cantidad > 0 else 0.0
+
+        summary.append({
+            "descripcion": it["descripcion"],
+            "kosten": net,
+            "steuern": tax,
+            "gesamtbetrag": total,
+            "kosten_pro_unidad": per_unit,
+            "cantidad": prod_cantidad,
+            "menge": prod_cantidad,
+            "fob_anteil_pct": round(fob_share * 100, 2),
+            "kosten_anteilig": kosten_anteilig,
+            "steuern_anteilig": steuern_anteilig,
+            "kosten_pro_einheit": kosten_pro_einheit,
+            "totalkosten": kosten_anteilig,
+            "total_steuern": steuern_anteilig,
+        })
 
     return {
-        "endtabelle": endtabelle,
-        "summenzeile": summenzeile,
-        "details": {
-            "produkte": [{"name": p.name, "einkaufspreis": p.einkaufspreis, "menge": p.menge, "maseinheit": p.maseinheit} for p in prods],
-            "zeilen_details": step_details,
-        },
-        "kontrollrechnung": kontrollrechnung,
+        "fob_currency": fob_currency,
+        "fob_gs": fob_gs,
+        "flete_total_gs": flete_total_gs,
+        "cif_currency": cif_currency,
+        "cif_gs": cif_gs,
+        "total_importacion": total_importacion,
+        "total_nacional": total_nacional,
+        "total_non_fob_costs": total_non_fob_costs,
+        "gran_total": gran_total,
+        "gran_total_per_unit": gran_total_per_unit,
+        "proveedor": prov_out,
+        "flete": flete_out,
+        "importacion": imp_out,
+        "costo_nacional": nac_out,
+        "proveedor_summary": summary,
     }

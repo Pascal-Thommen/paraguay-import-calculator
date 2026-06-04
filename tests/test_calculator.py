@@ -4,7 +4,7 @@ Tests all critical calculation logic, edge cases, and known bug fixes.
 Run: python3 tests/test_calculator.py
 """
 import sys
-sys.path.insert(0, "/tmp/import-calc")
+import os; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from calculator import calculate, PROVEEDOR_DEFAULTS, FLETE_DEFAULTS, IMPORTACION_DEFAULTS, NACIONAL_DEFAULTS
 
@@ -179,6 +179,95 @@ def test_different_fob_and_flete_rates():
     print("✓ test_different_fob_and_flete_rates")
 
 
+def test_total_non_fob_costs():
+    """total_non_fob_costs = flete_total_gs + total_importacion + total_nacional"""
+    prov = [{"descripcion": "Producto", "betrag": 1000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    flete = [{"descripcion": "Flete", "betrag": 100.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    imp = [{"descripcion": "dai", "betrag": 14.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    nac = [{"descripcion": "Transport", "betrag": 50000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    result = calculate(prov, flete, imp, nac, 7500.0, 7500.0)
+    expected = result["flete_total_gs"] + result["total_importacion"] + result["total_nacional"]
+    assert_near(result["total_non_fob_costs"], expected, "total_non_fob_costs")
+    assert result["total_non_fob_costs"] > 0, "total_non_fob_costs should be positive"
+    print("✓ test_total_non_fob_costs")
+
+
+def test_proveedor_summary_v7_fields():
+    """proveedor_summary entries have v7 fields: cantidad, fob_anteil_pct, kosten_anteilig, steuern_anteilig, kosten_pro_einheit"""
+    prov = [{"descripcion": "Widget A", "betrag": 1000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 10, "peso_volumen": 0}]
+    flete = [{"descripcion": "Flete", "betrag": 100.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    imp = [{"descripcion": "dai", "betrag": 14.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    nac = [{"descripcion": "Transport", "betrag": 50000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    result = calculate(prov, flete, imp, nac, 7500.0, 7500.0)
+    summary = result["proveedor_summary"][0]
+    # All v7 fields present
+    for field in ["cantidad", "fob_anteil_pct", "kosten_anteilig", "steuern_anteilig", "kosten_pro_einheit"]:
+        assert field in summary, f"Missing field: {field}"
+    # Legacy fields still present
+    for field in ["descripcion", "kosten", "steuern", "gesamtbetrag", "kosten_pro_unidad"]:
+        assert field in summary, f"Missing legacy field: {field}"
+    assert_near(summary["cantidad"], 10.0, "cantidad")
+    # Single product → 100% FOB share
+    assert_near(summary["fob_anteil_pct"], 100.0, "fob_anteil_pct")
+    print("✓ test_proveedor_summary_v7_fields")
+
+
+def test_fob_anteil_pct_multiple_products():
+    """fob_anteil_pct is proportional to product FOB / total FOB"""
+    prov = [
+        {"descripcion": "Product A", "betrag": 600.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 6, "peso_volumen": 0},
+        {"descripcion": "Product B", "betrag": 400.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 4, "peso_volumen": 0},
+    ]
+    result = calculate(prov, [], [], [], 7500.0, 7500.0)
+    s_a = result["proveedor_summary"][0]
+    s_b = result["proveedor_summary"][1]
+    assert_near(s_a["fob_anteil_pct"], 60.0, "product A share")
+    assert_near(s_b["fob_anteil_pct"], 40.0, "product B share")
+    assert_near(s_a["fob_anteil_pct"] + s_b["fob_anteil_pct"], 100.0, "shares sum to 100%")
+    print("✓ test_fob_anteil_pct_multiple_products")
+
+
+def test_kosten_anteilig_gt_fob():
+    """kosten_anteilig > FOB alone (includes proportional non-FOB costs)"""
+    prov = [{"descripcion": "Widget", "betrag": 100.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 5, "peso_volumen": 0}]
+    flete = [{"descripcion": "Flete", "betrag": 50.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    imp = [{"descripcion": "dai", "betrag": 14.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    nac = [{"descripcion": "Transport", "betrag": 10000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    result = calculate(prov, flete, imp, nac, 7500.0, 7500.0)
+    summary = result["proveedor_summary"][0]
+    assert summary["kosten_anteilig"] > summary["gesamtbetrag"], \
+        f"kosten_anteilig ({summary['kosten_anteilig']}) should exceed FOB ({summary['gesamtbetrag']})"
+    print("✓ test_kosten_anteilig_gt_fob")
+
+
+def test_kosten_pro_einheit():
+    """kosten_pro_einheit = kosten_anteilig / cantidad"""
+    prov = [{"descripcion": "Widget", "betrag": 100.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 5, "peso_volumen": 0}]
+    flete = [{"descripcion": "Flete", "betrag": 50.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    imp = [{"descripcion": "dai", "betrag": 14.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    nac = [{"descripcion": "Transport", "betrag": 10000.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    result = calculate(prov, flete, imp, nac, 7500.0, 7500.0)
+    summary = result["proveedor_summary"][0]
+    expected = summary["kosten_anteilig"] / summary["cantidad"]
+    assert_near(summary["kosten_pro_einheit"], expected, "kosten_pro_einheit")
+    print("✓ test_kosten_pro_einheit")
+
+
+def test_proportional_costs_sum_to_total():
+    """Sum of kosten_anteilig across all products = gran_total"""
+    prov = [
+        {"descripcion": "A", "betrag": 600.0, "aufteilung": "wert", "impuesto": "10%", "cantidad": 3, "peso_volumen": 0},
+        {"descripcion": "B", "betrag": 400.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 2, "peso_volumen": 0},
+    ]
+    flete = [{"descripcion": "Flete", "betrag": 100.0, "aufteilung": "wert", "impuesto": "10%", "cantidad": 1, "peso_volumen": 0}]
+    imp = [{"descripcion": "dai", "betrag": 14.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 1, "peso_volumen": 0}]
+    nac = [{"descripcion": "Transport", "betrag": 10000.0, "aufteilung": "wert", "impuesto": "10%", "cantidad": 1, "peso_volumen": 0}]
+    result = calculate(prov, flete, imp, nac, 7500.0, 7500.0)
+    sum_kosten = sum(s["kosten_anteilig"] for s in result["proveedor_summary"])
+    assert_near(sum_kosten, result["gran_total"], "sum of kosten_anteilig = gran_total")
+    print("✓ test_proportional_costs_sum_to_total")
+
+
 def test_proveedor_summary():
     """proveedor_summary should have correct per-unit costs"""
     prov = [{"descripcion": "Widget", "betrag": 100.0, "aufteilung": "wert", "impuesto": "Exento", "cantidad": 5, "peso_volumen": 0}]
@@ -209,6 +298,12 @@ if __name__ == "__main__":
         test_iva_map_coverage,
         test_different_fob_and_flete_rates,
         test_proveedor_summary,
+        test_total_non_fob_costs,
+        test_proveedor_summary_v7_fields,
+        test_fob_anteil_pct_multiple_products,
+        test_kosten_anteilig_gt_fob,
+        test_kosten_pro_einheit,
+        test_proportional_costs_sum_to_total,
     ]
     passed = 0
     failed = 0
